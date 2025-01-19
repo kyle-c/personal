@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply text-[#333333] font-crimson antialiased;
+    background-color: #FAF9F5;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-crimson;
+  }
+}
+
+@layer components {
+  .nav-link {
+    display: inline;
+    color: inherit;
+    opacity: 0.8;
+    text-decoration: underline;
+    text-decoration-style: solid;
+    text-decoration-color: hsl(from var(--default) h s l / 30%);
+    text-decoration-thickness: 0.05rem;
+    text-underline-offset: 0.1875rem;
+    transition: all 120ms ease-in-out;
+    text-decoration-skip-ink: auto;
+  }
+
+  .decorative-line {
+    max-width: 480px;
+    border: 0;
+    border-top: 0.0625rem dashed hsl(from var(--default) h s l / 15%);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}
