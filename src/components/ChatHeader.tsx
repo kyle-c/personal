@@ -4,8 +4,8 @@ import { useLanguage } from '../i18n/LanguageContext';
 export default function ChatHeader() {
   const { language, toggleLanguage, t } = useLanguage();
   const s = language === 'es'
-    ? { title: 'CaminoAbierto', subtitle: 'en línea', switchLabel: 'EN' }
-    : { title: 'CaminoAbierto', subtitle: 'online', switchLabel: 'ES' };
+    ? { title: 'FelixClaw', subtitle: 'en línea', switchLabel: 'EN' }
+    : { title: 'FelixClaw', subtitle: 'online', switchLabel: 'ES' };
 
   return (
     <div className="bg-wa-header text-white px-3 py-2 flex items-center gap-3 shrink-0">
@@ -16,7 +16,7 @@ export default function ChatHeader() {
 
       {/* Avatar */}
       <div className="w-10 h-10 rounded-full bg-wa-teal flex items-center justify-center text-white font-bold text-sm shrink-0">
-        CA
+        FC
       </div>
 
       {/* Name and status */}

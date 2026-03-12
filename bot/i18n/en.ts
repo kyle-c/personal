@@ -1,11 +1,10 @@
 export const en = {
-  welcome: "Hello! 👋 Welcome to CaminoAbierto.\nWe're here to help you. What do you need today?",
+  welcome: "Hey! 👋 Welcome to FelixClaw.\nWhat do you want to do?",
   menuButton: 'View Options',
   mainMenu: {
-    financial: '📊 Financial Tools',
-    legal: '⚖️ Legal & Immigration',
-    community: '🏘️ Community Services',
-    emergency: '🆘 Emergency',
+    sendMoney: '💸 Send Money',
+    findWork: '💼 Find Work',
+    knowRights: '⚖️ Know My Rights',
   },
   financial: {
     title: '💰 Financial Tools\nHow can we help you?',

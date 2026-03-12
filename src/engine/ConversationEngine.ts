@@ -22,6 +22,7 @@ function getNodeContent(nodeId: string, lang: Language): string {
 
   const contentMap: Record<string, string> = {
     welcome: s.welcome.greeting,
+    'all-services': s.allServices.title,
     'financial-menu': s.financial.title,
     'budget-start': s.budget.intro,
     'budget-income': s.budget.gotIncome,
@@ -55,9 +56,9 @@ function getNodeButtons(nodeId: string, lang: Language): ButtonOption[] {
   const s = strings[lang];
   const buttonMap: Record<string, ButtonOption[]> = {
     welcome: [
-      { id: 'financial', label: { en: en.welcome.financial, es: es.welcome.financial } },
-      { id: 'legal', label: { en: en.welcome.legal, es: es.welcome.legal } },
-      { id: 'community', label: { en: en.welcome.community, es: es.welcome.community } },
+      { id: 'sendMoney', label: { en: en.welcome.sendMoney, es: es.welcome.sendMoney } },
+      { id: 'findWork', label: { en: en.welcome.findWork, es: es.welcome.findWork } },
+      { id: 'knowRights', label: { en: en.welcome.knowRights, es: es.welcome.knowRights } },
     ],
     'itin-guide': [
       { id: 'back', label: { en: en.itin.back, es: es.itin.back } },
@@ -126,6 +127,21 @@ function getNodeButtons(nodeId: string, lang: Language): ButtonOption[] {
 /** Get list items for list-type nodes */
 function getNodeListItems(nodeId: string): ButtonOption[] {
   const listMap: Record<string, ButtonOption[]> = {
+    'all-services': [
+      { id: 'sendMoney', label: { en: en.allServices.sendMoney, es: es.allServices.sendMoney } },
+      { id: 'findWork', label: { en: en.allServices.findWork, es: es.allServices.findWork } },
+      { id: 'knowRights', label: { en: en.allServices.knowRights, es: es.allServices.knowRights } },
+      { id: 'budgetCalc', label: { en: en.allServices.budgetCalc, es: es.allServices.budgetCalc } },
+      { id: 'getITIN', label: { en: en.allServices.getITIN, es: es.allServices.getITIN } },
+      { id: 'buildCredit', label: { en: en.allServices.buildCredit, es: es.allServices.buildCredit } },
+      { id: 'openBank', label: { en: en.allServices.openBank, es: es.allServices.openBank } },
+      { id: 'findHealthcare', label: { en: en.allServices.findHealthcare, es: es.allServices.findHealthcare } },
+      { id: 'findHousing', label: { en: en.allServices.findHousing, es: es.allServices.findHousing } },
+      { id: 'getEducation', label: { en: en.allServices.getEducation, es: es.allServices.getEducation } },
+      { id: 'legalHelp', label: { en: en.allServices.legalHelp, es: es.allServices.legalHelp } },
+      { id: 'events', label: { en: en.allServices.events, es: es.allServices.events } },
+      { id: 'backToMenu', label: { en: en.allServices.backToMenu, es: es.allServices.backToMenu } },
+    ],
     'financial-menu': [
       { id: 'budget', label: { en: en.financial.budget, es: es.financial.budget } },
       { id: 'itin', label: { en: en.financial.itin, es: es.financial.itin } },
@@ -218,10 +234,13 @@ export function processTextInput(
   text: string,
   lang: Language
 ): { newState: EngineState; newMessages: Message[] } {
-  // Handle emergency keyword from any screen
+  // Handle keywords from any screen
   const lower = text.trim().toLowerCase();
-  if (['emergency', 'emergencia', '911', 'sos', 'help', 'ayuda'].includes(lower)) {
+  if (['emergency', 'emergencia', '911', 'sos'].includes(lower)) {
     return navigateToNode(state, 'emergency', lang);
+  }
+  if (['menu', 'menú', 'services', 'servicios', 'all', 'todo'].includes(lower)) {
+    return navigateToNode(state, 'all-services', lang);
   }
 
   const node = flowNodes[state.currentNode];
@@ -414,7 +433,7 @@ function navigateToNode(
   } else {
     // Standard node
     const content = getNodeContent(nodeId, lang);
-    const isListNode = ['financial-menu', 'legal-menu', 'community-menu', 'document-checklists', 'resource-finder'].includes(nodeId);
+    const isListNode = ['all-services', 'financial-menu', 'legal-menu', 'community-menu', 'document-checklists', 'resource-finder'].includes(nodeId);
     const buttons = getNodeButtons(nodeId, lang);
     const listItems = isListNode ? getNodeListItems(nodeId) : undefined;
 

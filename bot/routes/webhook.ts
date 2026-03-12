@@ -1,7 +1,7 @@
 import type { WebhookPayload } from '../types';
 import { routeMessage } from '../flows/index';
 
-const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'camino-abierto-verify';
+const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'felixclaw-verify';
 
 /**
  * GET /webhook — Webhook verification endpoint

@@ -16,10 +16,36 @@ export const flowNodes: Record<string, FlowNode> = {
       },
     ],
     transitions: {
-      financial: 'financial-menu',
-      legal: 'legal-menu',
-      community: 'community-menu',
-      emergency: 'emergency',
+      sendMoney: 'remittances-guide',
+      findWork: 'community-events',
+      knowRights: 'know-your-rights',
+    },
+  },
+
+  // ── ALL SERVICES ──
+  'all-services': {
+    id: 'all-services',
+    messages: [
+      {
+        type: 'list',
+        sender: 'bot',
+        content: { en: '', es: '' }, // uses i18n allServices.title
+      },
+    ],
+    transitions: {
+      sendMoney: 'remittances-guide',
+      findWork: 'community-events',
+      knowRights: 'know-your-rights',
+      budgetCalc: 'budget-start',
+      getITIN: 'itin-guide',
+      buildCredit: 'credit-guide',
+      openBank: 'bank-account-guide',
+      findHealthcare: 'health-resources',
+      findHousing: 'housing-resources',
+      getEducation: 'education-resources',
+      legalHelp: 'legal-menu',
+      events: 'community-events',
+      backToMenu: 'welcome',
     },
   },
 

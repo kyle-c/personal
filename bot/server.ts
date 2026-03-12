@@ -1,5 +1,5 @@
 /**
- * CaminoAbierto WhatsApp Bot Server
+ * FelixClaw WhatsApp Bot Server
  *
  * Setup:
  * 1. Create a Meta Business account and WhatsApp Business App
@@ -48,7 +48,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
   // Health check
   if (url === '/' || url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'CaminoAbierto WhatsApp Bot' }));
+    res.end(JSON.stringify({ status: 'ok', service: 'FelixClaw WhatsApp Bot' }));
     return;
   }
 
@@ -83,7 +83,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 CaminoAbierto Bot Server running on port ${PORT}`);
+  console.log(`🚀 FelixClaw Bot Server running on port ${PORT}`);
   console.log(`📱 Webhook URL: http://localhost:${PORT}/webhook`);
   console.log(`\nSetup instructions:`);
   console.log(`1. Set WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN, WHATSAPP_VERIFY_TOKEN`);

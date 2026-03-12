@@ -1,11 +1,10 @@
 export const es = {
-  welcome: '¡Hola! 👋 Bienvenido a CaminoAbierto.\nEstamos aquí para ayudarte. ¿Qué necesitas hoy?',
+  welcome: '¡Hey! 👋 Bienvenido a FelixClaw.\n¿Qué quieres hacer?',
   menuButton: 'Ver Opciones',
   mainMenu: {
-    financial: '📊 Herramientas Financieras',
-    legal: '⚖️ Legal e Inmigración',
-    community: '🏘️ Servicios Comunitarios',
-    emergency: '🆘 Emergencia',
+    sendMoney: '💸 Enviar Dinero',
+    findWork: '💼 Buscar Trabajo',
+    knowRights: '⚖️ Conocer Mis Derechos',
   },
   financial: {
     title: '💰 Herramientas Financieras\n¿En qué te podemos ayudar?',
