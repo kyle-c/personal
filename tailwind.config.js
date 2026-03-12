@@ -4,13 +4,30 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        crimson: ['"Crimson Pro"', 'serif'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
       },
-      maxWidth: {
-        'prose': '65ch',
-      },
-      spacing: {
-        'nav': '4rem',
+      colors: {
+        wa: {
+          green: '#25D366',
+          teal: '#128C7E',
+          dark: '#075E54',
+          light: '#DCF8C6',
+          'chat-bg': '#ECE5DD',
+          blue: '#34B7F1',
+          'msg-in': '#FFFFFF',
+          'msg-out': '#DCF8C6',
+          'header': '#075E54',
+          'input-bg': '#F0F0F0',
+        },
+        brand: {
+          primary: '#0D7377',
+          'primary-light': '#14919B',
+          secondary: '#F59E0B',
+          'secondary-dark': '#D97706',
+          accent: '#1E3A5F',
+          emergency: '#DC2626',
+          success: '#059669',
+        },
       },
     },
   },
