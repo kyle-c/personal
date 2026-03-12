@@ -58,7 +58,6 @@ function getNodeButtons(nodeId: string, lang: Language): ButtonOption[] {
       { id: 'financial', label: { en: en.welcome.financial, es: es.welcome.financial } },
       { id: 'legal', label: { en: en.welcome.legal, es: es.welcome.legal } },
       { id: 'community', label: { en: en.welcome.community, es: es.welcome.community } },
-      { id: 'emergency', label: { en: en.welcome.emergencyBtn, es: es.welcome.emergencyBtn } },
     ],
     'itin-guide': [
       { id: 'back', label: { en: en.itin.back, es: es.itin.back } },
@@ -219,6 +218,12 @@ export function processTextInput(
   text: string,
   lang: Language
 ): { newState: EngineState; newMessages: Message[] } {
+  // Handle emergency keyword from any screen
+  const lower = text.trim().toLowerCase();
+  if (['emergency', 'emergencia', '911', 'sos', 'help', 'ayuda'].includes(lower)) {
+    return navigateToNode(state, 'emergency', lang);
+  }
+
   const node = flowNodes[state.currentNode];
   if (!node || !node.expectsInput || !node.inputHandler) {
     return { newState: state, newMessages: [] };

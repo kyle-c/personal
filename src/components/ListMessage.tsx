@@ -39,7 +39,7 @@ export default function ListMessage({ message, onAction, disabled }: Props) {
 
         {/* List button */}
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => setIsOpen(true)}
           disabled={disabled}
           className={`
             w-full mt-1 py-2.5 rounded-lg text-sm font-medium
@@ -55,22 +55,40 @@ export default function ListMessage({ message, onAction, disabled }: Props) {
           {buttonText}
         </button>
 
-        {/* Dropdown list */}
+        {/* Full-screen modal overlay */}
         {isOpen && (
-          <div className="mt-1 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden">
-            {items.map((item: ButtonOption, index: number) => (
+          <div className="absolute inset-0 z-50 flex flex-col bg-white animate-slide-up">
+            {/* Modal header */}
+            <div className="bg-wa-header text-white px-4 py-4 flex items-center gap-3 shrink-0">
               <button
-                key={item.id}
-                onClick={() => handleSelect(item.id)}
-                className={`
-                  w-full px-4 py-3 text-left text-sm hover:bg-gray-50 active:bg-gray-100
-                  flex items-center gap-3 transition-colors cursor-pointer
-                  ${index < items.length - 1 ? 'border-b border-gray-100' : ''}
-                `}
+                onClick={() => setIsOpen(false)}
+                className="p-1 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
               >
-                <span className="text-gray-800">{t(item.label)}</span>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
-            ))}
+              <span className="font-medium text-base">{buttonText}</span>
+            </div>
+
+            {/* Modal body */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="py-2">
+                {items.map((item: ButtonOption, index: number) => (
+                  <button
+                    key={item.id}
+                    onClick={() => handleSelect(item.id)}
+                    className={`
+                      w-full px-5 py-4 text-left hover:bg-gray-50 active:bg-gray-100
+                      flex items-center gap-3 transition-colors cursor-pointer
+                      ${index < items.length - 1 ? 'border-b border-gray-100' : ''}
+                    `}
+                  >
+                    <span className="text-[15px] text-gray-800">{t(item.label)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>

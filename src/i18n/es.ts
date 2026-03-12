@@ -11,7 +11,7 @@ export const es = {
     emergency: 'Emergencia',
   },
   welcome: {
-    greeting: '¡Hola! 👋 Bienvenido a CaminoAbierto.\nEstamos aquí para ayudarte. ¿Qué necesitas hoy?',
+    greeting: '¡Hola! 👋 Bienvenido a CaminoAbierto.\nEstamos aquí para ayudarte. ¿Qué necesitas hoy?\n\n🆘 Escribe "emergencia" para ayuda urgente',
     financial: '📊 Herramientas Financieras',
     legal: '⚖️ Legal e Inmigración',
     community: '🏘️ Servicios Comunitarios',
