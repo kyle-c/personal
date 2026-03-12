@@ -111,7 +111,7 @@ export default function Simulator() {
   );
 
   const expectsInput = engineState.currentNode
-    ? ['welcome', 'budget-start', 'budget-income', 'budget-rent', 'budget-food', 'budget-transport'].includes(
+    ? ['welcome', 'send-money-start', 'send-money-amount', 'find-work-start', 'budget-start', 'budget-income', 'budget-rent', 'budget-food', 'budget-transport'].includes(
         engineState.currentNode
       )
     : false;
