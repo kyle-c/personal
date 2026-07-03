@@ -1,0 +1,71 @@
+# Felix Studio
+
+A working prototype of a **conversational design system**: a studio where product
+designers build and maintain a digital product by talking to the design system
+itself, instead of hand-assembling screens from a static component library.
+
+```bash
+cd felix-studio
+npm install
+npm run dev
+```
+
+## The idea
+
+A traditional design system is a reference — tokens, components, and docs that a
+designer reads and then applies by hand. Felix Studio inverts that: the design
+system is the **interlocutor**. You describe intent ("create a pricing page",
+"make everything rounder", "audit the product") and the system executes it,
+because it — not the designer's memory — holds the constraints.
+
+Three principles drive the implementation:
+
+1. **Tokens are the single source of truth.** Every primitive and every screen
+   reads token values through CSS custom properties (`src/felix/tokens.ts`).
+   A one-sentence request restyles the entire product because nothing on the
+   canvas owns its own styling.
+2. **The conversation is the contribution process.** Every change — spoken or
+   made directly in the token editor — lands in a changelog with a snapshot and
+   one-click revert. The product's history is legible and reversible.
+3. **Maintenance is a dialogue, not a chore.** The audit (`src/engine/audit.ts`)
+   continuously checks for token drift (values that bypass the system), WCAG
+   contrast failures, and structural gaps — and the fix is also conversational
+   ("fix drift").
+
+## What you can say
+
+| Build | Restyle | Maintain |
+| --- | --- | --- |
+| "create a pricing page with a hero and pricing table" | "change the primary color to forest green" | "audit the product" |
+| "add a signup form to the home page" | "set the background to #F4F1EA" | "fix drift" |
+| "remove the footer" | "make everything rounder" / "radius 12px" | "undo" |
+| "delete the dashboard page" | "more breathing room" / "make it compact" | revert any changelog entry |
+|  | "use a serif for headings", "remove all shadows" |  |
+
+The parser (`src/engine/parser.ts`) is deterministic and offline so the demo
+needs no API key. In a production system an LLM grounded in the design system
+would sit behind the same `Intent` contract.
+
+## Layout
+
+- **Left — Conversation.** Talk to Felix; audits render inline as findings.
+- **Center — Canvas.** "Fieldnote", the sample product, rendered live from
+  Felix primitives. Switch screens in the top bar.
+- **Right — Inspector.** Tokens (live editors), Primitives (the component
+  gallery rendered from current tokens), Changelog (with reverts), Audit
+  (continuous health report).
+
+State persists to `localStorage`; "Reset demo" starts over. The Dashboard
+screen ships with one deliberately drifted block so the audit has something
+real to find.
+
+## A note on sources
+
+This app was built against the concepts in
+[kylecooney.com/conversational-design-system](https://kylecooney.com/conversational-design-system)
+and the visual primitives of [felix-design.vercel.app](http://felix-design.vercel.app).
+Both hosts were unreachable from the build environment (network egress policy),
+so the token defaults in `src/felix/tokens.ts` are a placeholder rendition —
+warm paper, ink, Crimson Pro display type — modeled on kylecooney.com. To adopt
+the real Felix values, edit `DEFAULT_TOKENS` in that one file; nothing else
+needs to change.
