@@ -27,7 +27,15 @@ export interface Screen {
   id: string;
   name: string;
   blocks: Block[];
+  /** Position of the frame on the infinite canvas. */
+  x: number;
+  y: number;
 }
+
+export type Selection =
+  | { kind: 'none' }
+  | { kind: 'screen'; screenId: string }
+  | { kind: 'block'; screenId: string; blockId: string };
 
 export interface ChangelogEntry {
   id: string;
@@ -57,7 +65,7 @@ export interface AuditFinding {
 export interface StudioState {
   tokens: TokenSet;
   screens: Screen[];
-  activeScreenId: string;
+  selection: Selection;
   messages: Message[];
   changelog: ChangelogEntry[];
 }

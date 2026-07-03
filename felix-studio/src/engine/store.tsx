@@ -16,13 +16,19 @@ import {
   ChangelogEntry,
   Message,
   Screen,
+  Selection,
   StudioState,
 } from './types';
 
 let idCounter = 0;
 const uid = () => `id-${Date.now().toString(36)}-${(idCounter++).toString(36)}`;
 
-const STORAGE_KEY = 'felix-studio-state-v1';
+const STORAGE_KEY = 'felix-studio-state-v2';
+const LEGACY_STORAGE_KEY = 'felix-studio-state-v1';
+
+/** Frame width on the canvas; matches the Canvas component. */
+export const FRAME_WIDTH = 960;
+const FRAME_GAP = 140;
 
 // ---------------------------------------------------------------------------
 // Seed: a small product already in flight, so the canvas is never empty.
@@ -32,6 +38,8 @@ function seedState(): StudioState {
   const home: Screen = {
     id: uid(),
     name: 'Home',
+    x: 0,
+    y: 0,
     blocks: [
       { id: uid(), kind: 'navbar' },
       { id: uid(), kind: 'hero' },
@@ -43,6 +51,8 @@ function seedState(): StudioState {
   const dashboard: Screen = {
     id: uid(),
     name: 'Dashboard',
+    x: FRAME_WIDTH + FRAME_GAP,
+    y: 0,
     blocks: [
       { id: uid(), kind: 'navbar' },
       { id: uid(), kind: 'stats' },
@@ -54,13 +64,13 @@ function seedState(): StudioState {
   return {
     tokens: DEFAULT_TOKENS,
     screens: [home, dashboard],
-    activeScreenId: home.id,
+    selection: { kind: 'none' },
     messages: [
       {
         id: uid(),
         role: 'felix',
         text:
-          'Hi, I’m Felix — your design system, in conversation. The product on the canvas is composed entirely from my tokens and primitives, so we can build and restyle it together just by talking.\n\nTry: “create a pricing page with a hero and pricing table”, “change the primary color to forest green”, “make everything rounder”, or “audit the product”. Type “help” for the full range.',
+          'Hi, I’m Felix — your design system, in conversation. Every frame on this canvas is composed from my tokens and primitives, so we can build and restyle the product together just by talking.\n\nTry: “create a pricing page with a hero and pricing table”, “change the primary color to forest green”, “make everything rounder”, or “audit the product”. Type “help” for the full range.\n\nCanvas basics: scroll to pan, ⌘/Ctrl + scroll to zoom, click a frame or a section to select it.',
       },
     ],
     changelog: [],
@@ -73,7 +83,13 @@ function seedState(): StudioState {
 
 type Action =
   | { type: 'converse'; input: string }
-  | { type: 'select-screen'; screenId: string }
+  | { type: 'select'; selection: Selection }
+  | { type: 'rename-screen'; screenId: string; name: string }
+  | { type: 'move-screen'; screenId: string; x: number; y: number }
+  | { type: 'delete-block'; screenId: string; blockId: string }
+  | { type: 'shift-block'; screenId: string; blockId: string; dir: -1 | 1 }
+  | { type: 'clear-overrides'; screenId: string; blockId: string }
+  | { type: 'undo' }
   | { type: 'set-tokens-direct'; tokens: TokenSet; summary: string }
   | { type: 'revert-to'; entryId: string }
   | { type: 'reset' };
@@ -109,13 +125,29 @@ function withChange(
   return { ...draft, changelog: [entry, ...state.changelog] };
 }
 
+/** The screen the conversation refers to when none is named: the selected one. */
+function contextScreen(state: StudioState): Screen | undefined {
+  if (state.selection.kind !== 'none') {
+    const hit = state.screens.find((s) => s.id === (state.selection as { screenId: string }).screenId);
+    if (hit) return hit;
+  }
+  return state.screens[0];
+}
+
 function findScreen(state: StudioState, ref?: string): Screen | undefined {
-  if (!ref) return state.screens.find((s) => s.id === state.activeScreenId);
+  if (!ref) return contextScreen(state);
   const lower = ref.toLowerCase();
   return (
     state.screens.find((s) => s.name.toLowerCase() === lower) ??
     state.screens.find((s) => s.name.toLowerCase().includes(lower))
   );
+}
+
+/** Where the next created frame goes: right of the rightmost frame. */
+function nextFramePosition(screens: Screen[]): { x: number; y: number } {
+  if (screens.length === 0) return { x: 0, y: 0 };
+  const maxX = Math.max(...screens.map((s) => s.x));
+  return { x: maxX + FRAME_WIDTH + FRAME_GAP, y: Math.min(...screens.map((s) => s.y)) };
 }
 
 const BLOCK_LABELS: Record<BlockKind, string> = {
@@ -131,11 +163,37 @@ const BLOCK_LABELS: Record<BlockKind, string> = {
   footer: 'footer',
 };
 
+export { BLOCK_LABELS };
+
 function reply(state: StudioState, text: string, audit?: Message['audit']): StudioState {
   return {
     ...state,
     messages: [...state.messages, { id: uid(), role: 'felix', text, audit }],
   };
+}
+
+function applyUndo(state: StudioState): StudioState {
+  const last = state.changelog[0];
+  if (!last) return reply(state, 'There’s nothing to undo yet — the changelog is empty.');
+  const reverted: StudioState = {
+    ...state,
+    tokens: last.before.tokens,
+    screens: last.before.screens,
+    changelog: state.changelog.slice(1),
+  };
+  return reply(sanitizeSelection(reverted), `Reverted “${last.summary}”.`);
+}
+
+/** Drop the selection if it points at something that no longer exists. */
+function sanitizeSelection(state: StudioState): StudioState {
+  const sel = state.selection;
+  if (sel.kind === 'none') return state;
+  const screen = state.screens.find((s) => s.id === sel.screenId);
+  if (!screen) return { ...state, selection: { kind: 'none' } };
+  if (sel.kind === 'block' && !screen.blocks.some((b) => b.id === sel.blockId)) {
+    return { ...state, selection: { kind: 'screen', screenId: screen.id } };
+  }
+  return state;
 }
 
 function executeIntent(state: StudioState, intent: Intent): StudioState {
@@ -149,8 +207,8 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       const warnings = findings.filter((f) => f.severity === 'warning').length;
       const headline =
         issues + warnings === 0 || findings[0]?.severity === 'ok'
-          ? 'I walked every screen — the product is healthy.'
-          : `I walked every screen and found ${issues} issue${issues === 1 ? '' : 's'} and ${warnings} warning${warnings === 1 ? '' : 's'}:`;
+          ? 'I walked every frame — the product is healthy.'
+          : `I walked every frame and found ${issues} issue${issues === 1 ? '' : 's'} and ${warnings} warning${warnings === 1 ? '' : 's'}:`;
       return reply(state, headline, findings);
     }
 
@@ -172,33 +230,23 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       return reply(next, `Done. I removed the hard-coded overrides from ${drifted.join(' and ')} and snapped them back to the token system.`);
     }
 
-    case 'undo': {
-      const last = state.changelog[0];
-      if (!last) return reply(state, 'There’s nothing to undo yet — the changelog is empty.');
-      const reverted: StudioState = {
-        ...state,
-        tokens: last.before.tokens,
-        screens: last.before.screens,
-        changelog: state.changelog.slice(1),
-      };
-      const active = reverted.screens.find((s) => s.id === reverted.activeScreenId);
-      return reply(
-        { ...reverted, activeScreenId: active ? reverted.activeScreenId : reverted.screens[0]?.id ?? '' },
-        `Reverted “${last.summary}”.`,
-      );
-    }
+    case 'undo':
+      return applyUndo(state);
 
     case 'create-screen': {
       const existing = findScreen(state, intent.name);
       if (existing && existing.name.toLowerCase() === intent.name.toLowerCase()) {
-        return reply(state, `There’s already a “${existing.name}” screen — say “add a hero to the ${existing.name.toLowerCase()} page” to keep building it.`);
+        return reply(state, `There’s already a “${existing.name}” frame — say “add a hero to the ${existing.name.toLowerCase()} page” to keep building it.`);
       }
       const blocks: BlockKind[] =
         intent.blocks.length > 0 ? intent.blocks : ['navbar', 'hero', 'footer'];
       const ordered = orderBlocks(blocks);
+      const pos = nextFramePosition(state.screens);
       const screen: Screen = {
         id: uid(),
         name: intent.name,
+        x: pos.x,
+        y: pos.y,
         blocks: ordered.map((kind) => ({ id: uid(), kind })),
       };
       const next = withChange(
@@ -208,31 +256,31 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
         `Composed from: ${ordered.map((k) => BLOCK_LABELS[k]).join(', ')}`,
         (draft) => {
           draft.screens.push(screen);
-          draft.activeScreenId = screen.id;
+          draft.selection = { kind: 'screen', screenId: screen.id };
         },
       );
       const auto = intent.blocks.length === 0 ? ' I started it with a navbar, hero and footer — tell me what to add next.' : '';
-      return reply(next, `Created the “${intent.name}” screen with ${ordered.length} section${ordered.length === 1 ? '' : 's'}, all composed from Felix primitives.${auto}`);
+      return reply(next, `Created the “${intent.name}” frame with ${ordered.length} section${ordered.length === 1 ? '' : 's'}, all composed from Felix primitives. It’s on the canvas to the right.${auto}`);
     }
 
     case 'remove-screen': {
       const screen = findScreen(state, intent.screenName);
-      if (!screen) return reply(state, `I couldn’t find a screen called “${intent.screenName}”.`);
+      if (!screen) return reply(state, `I couldn’t find a frame called “${intent.screenName}”.`);
       if (state.screens.length === 1) {
-        return reply(state, 'That’s the last screen — I’d rather not leave the product empty. Create another screen first.');
+        return reply(state, 'That’s the last frame — I’d rather not leave the canvas empty. Create another screen first.');
       }
       const next = withChange(state, 'screen', `Removed “${screen.name}” screen`, undefined, (draft) => {
         draft.screens = draft.screens.filter((s) => s.id !== screen.id);
-        if (draft.activeScreenId === screen.id) draft.activeScreenId = draft.screens[0].id;
       });
-      return reply(next, `Removed the “${screen.name}” screen. Its blocks are gone, but “undo” brings it back.`);
+      return reply(sanitizeSelection(next), `Removed the “${screen.name}” frame. Its blocks are gone, but “undo” brings it back.`);
     }
 
     case 'add-block': {
       const screen = findScreen(state, intent.screenName);
       if (!screen) {
-        return reply(state, `I couldn’t find a screen matching “${intent.screenName}”. Which screen should this go on?`);
+        return reply(state, `I couldn’t find a frame matching “${intent.screenName}”. Which screen should this go on?`);
       }
+      let newBlockId = '';
       const next = withChange(
         state,
         'screen',
@@ -241,16 +289,28 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
         (draft) => {
           const target = draft.screens.find((s) => s.id === screen.id)!;
           const block: Block = { id: uid(), kind: intent.block };
+          newBlockId = block.id;
           insertBlock(target, block);
-          draft.activeScreenId = target.id;
+          draft.selection = { kind: 'block', screenId: target.id, blockId: block.id };
         },
       );
+      void newBlockId;
       return reply(next, `Added a ${BLOCK_LABELS[intent.block]} to “${screen.name}”. It reads straight from the tokens, so it already matches everything else.`);
     }
 
     case 'remove-block': {
-      const screen = findScreen(state, intent.screenName);
-      if (!screen) return reply(state, `I couldn’t find that screen.`);
+      // If a block of this kind is selected, prefer that exact one.
+      const sel = state.selection;
+      let screen = findScreen(state, intent.screenName);
+      if (
+        !intent.screenName &&
+        sel.kind === 'block'
+      ) {
+        const selScreen = state.screens.find((s) => s.id === sel.screenId);
+        const selBlock = selScreen?.blocks.find((b) => b.id === sel.blockId);
+        if (selScreen && selBlock?.kind === intent.block) screen = selScreen;
+      }
+      if (!screen) return reply(state, `I couldn’t find that frame.`);
       const idx = screen.blocks.findIndex((b) => b.kind === intent.block);
       if (idx === -1) {
         return reply(state, `“${screen.name}” doesn’t have a ${BLOCK_LABELS[intent.block]}.`);
@@ -261,13 +321,12 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
         `Removed ${BLOCK_LABELS[intent.block]} from “${screen.name}”`,
         undefined,
         (draft) => {
-          const target = draft.screens.find((s) => s.id === screen.id)!;
+          const target = draft.screens.find((s) => s.id === screen!.id)!;
           const i = target.blocks.findIndex((b) => b.kind === intent.block);
           target.blocks.splice(i, 1);
-          draft.activeScreenId = target.id;
         },
       );
-      return reply(next, `Removed the ${BLOCK_LABELS[intent.block]} from “${screen.name}”.`);
+      return reply(sanitizeSelection(next), `Removed the ${BLOCK_LABELS[intent.block]} from “${screen.name}”.`);
     }
 
     case 'set-color': {
@@ -290,7 +349,7 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
           (f.title.toLowerCase().includes('contrast') || f.title.toLowerCase().includes('read')),
       );
       const caveat = audit.length > 0 ? ` One heads-up: ${audit[0].detail}` : '';
-      return reply(next, `Updated the ${intent.slot} color token to ${intent.value}. Every screen that uses it just changed with it — that’s the point of a single source of truth.${caveat}`);
+      return reply(next, `Updated the ${intent.slot} color token to ${intent.value}. Every frame that uses it just changed with it — that’s the point of a single source of truth.${caveat}`);
     }
 
     case 'set-radius': {
@@ -318,7 +377,7 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       const next = withChange(state, 'token', `Set spacing density to ${intent.density}`, `${prev} → ${intent.density}`, (draft) => {
         draft.tokens.space.density = intent.density;
       });
-      return reply(next, `Spacing is now ${intent.density}. The whole rhythm of the product shifted — no screen had to be touched individually.`);
+      return reply(next, `Spacing is now ${intent.density}. The whole rhythm of the product shifted — no frame had to be touched individually.`);
     }
 
     case 'set-shadow': {
@@ -391,13 +450,93 @@ function reducer(state: StudioState, action: Action): StudioState {
       };
       return executeIntent(withUser, parse(input));
     }
-    case 'select-screen':
-      return { ...state, activeScreenId: action.screenId };
+
+    case 'select':
+      return { ...state, selection: action.selection };
+
+    case 'rename-screen': {
+      const screen = state.screens.find((s) => s.id === action.screenId);
+      const name = action.name.trim();
+      if (!screen || !name || screen.name === name) return state;
+      return withChange(state, 'screen', `Renamed “${screen.name}” to “${name}”`, undefined, (draft) => {
+        draft.screens.find((s) => s.id === action.screenId)!.name = name;
+      });
+    }
+
+    case 'move-screen': {
+      // Position moves are canvas arrangement, not design changes — no changelog.
+      return {
+        ...state,
+        screens: state.screens.map((s) =>
+          s.id === action.screenId ? { ...s, x: action.x, y: action.y } : s,
+        ),
+      };
+    }
+
+    case 'delete-block': {
+      const screen = state.screens.find((s) => s.id === action.screenId);
+      const block = screen?.blocks.find((b) => b.id === action.blockId);
+      if (!screen || !block) return state;
+      const next = withChange(
+        state,
+        'screen',
+        `Removed ${BLOCK_LABELS[block.kind]} from “${screen.name}”`,
+        undefined,
+        (draft) => {
+          const target = draft.screens.find((s) => s.id === action.screenId)!;
+          target.blocks = target.blocks.filter((b) => b.id !== action.blockId);
+        },
+      );
+      return sanitizeSelection(next);
+    }
+
+    case 'shift-block': {
+      const screen = state.screens.find((s) => s.id === action.screenId);
+      if (!screen) return state;
+      const idx = screen.blocks.findIndex((b) => b.id === action.blockId);
+      const to = idx + action.dir;
+      if (idx === -1 || to < 0 || to >= screen.blocks.length) return state;
+      const block = screen.blocks[idx];
+      return withChange(
+        state,
+        'screen',
+        `Moved ${BLOCK_LABELS[block.kind]} ${action.dir === -1 ? 'up' : 'down'} on “${screen.name}”`,
+        undefined,
+        (draft) => {
+          const target = draft.screens.find((s) => s.id === action.screenId)!;
+          const [moved] = target.blocks.splice(idx, 1);
+          target.blocks.splice(to, 0, moved);
+        },
+      );
+    }
+
+    case 'clear-overrides': {
+      const screen = state.screens.find((s) => s.id === action.screenId);
+      const block = screen?.blocks.find((b) => b.id === action.blockId);
+      if (!screen || !block || !block.overrides) return state;
+      return withChange(
+        state,
+        'screen',
+        `Fixed token drift on “${screen.name}”`,
+        undefined,
+        (draft) => {
+          const target = draft.screens
+            .find((s) => s.id === action.screenId)!
+            .blocks.find((b) => b.id === action.blockId)!;
+          delete target.overrides;
+        },
+      );
+    }
+
+    case 'undo':
+      return applyUndo(state);
+
     case 'set-tokens-direct': {
       return withChange(state, 'token', action.summary, undefined, (draft) => {
         draft.tokens = action.tokens;
       });
     }
+
     case 'revert-to': {
       const entry = state.changelog.find((e) => e.id === action.entryId);
       if (!entry) return state;
@@ -408,12 +547,12 @@ function reducer(state: StudioState, action: Action): StudioState {
         screens: entry.before.screens,
         changelog: state.changelog.slice(idx + 1),
       };
-      const activeOk = reverted.screens.some((s) => s.id === reverted.activeScreenId);
       return reply(
-        { ...reverted, activeScreenId: activeOk ? reverted.activeScreenId : reverted.screens[0]?.id ?? '' },
+        sanitizeSelection(reverted),
         `Rolled the system back to just before “${entry.summary}” (change #${entry.seq}).`,
       );
     }
+
     case 'reset':
       return seedState();
   }
@@ -435,8 +574,32 @@ function loadInitial(): StudioState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as StudioState;
+      if (
+        parsed.tokens &&
+        Array.isArray(parsed.screens) &&
+        parsed.screens.length > 0 &&
+        typeof parsed.screens[0].x === 'number'
+      ) {
+        return { ...parsed, selection: parsed.selection ?? { kind: 'none' } };
+      }
+    }
+    // Migrate a pre-canvas (v1) save: lay its screens out left to right.
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy) {
+      const parsed = JSON.parse(legacy) as StudioState & { activeScreenId?: string };
       if (parsed.tokens && Array.isArray(parsed.screens) && parsed.screens.length > 0) {
-        return parsed;
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        return {
+          tokens: parsed.tokens,
+          screens: parsed.screens.map((s, i) => ({
+            ...s,
+            x: i * (FRAME_WIDTH + FRAME_GAP),
+            y: 0,
+          })),
+          selection: { kind: 'none' },
+          messages: parsed.messages ?? [],
+          changelog: [],
+        };
       }
     }
   } catch {

@@ -45,11 +45,13 @@ const BLOCK_ALIASES: Record<string, BlockKind> = {
   login: 'form',
   contact: 'form',
   pricing: 'pricing',
+  'pricing table': 'pricing',
   plans: 'pricing',
   testimonial: 'testimonial',
   testimonials: 'testimonial',
   quote: 'testimonial',
   table: 'table',
+  'data table': 'table',
   list: 'table',
   cta: 'cta',
   'call to action': 'cta',
@@ -57,19 +59,25 @@ const BLOCK_ALIASES: Record<string, BlockKind> = {
 };
 
 function findBlocks(text: string): BlockKind[] {
-  const found: BlockKind[] = [];
-  // Longest aliases first so "feature grid" wins over "grid".
+  const found: { kind: BlockKind; index: number }[] = [];
+  // Longest aliases first so "pricing table" wins over both "pricing" and
+  // "table". Consumed text is blanked (not removed) so indices stay stable,
+  // letting us return blocks in the order the designer said them.
   const aliases = Object.keys(BLOCK_ALIASES).sort((a, b) => b.length - a.length);
   let remaining = text;
   for (const alias of aliases) {
     const re = new RegExp(`\\b${alias.replace(/[-\s]/g, '[-\\s]')}\\b`, 'i');
-    if (re.test(remaining)) {
+    const m = remaining.match(re);
+    if (m && m.index !== undefined) {
       const kind = BLOCK_ALIASES[alias];
-      if (!found.includes(kind)) found.push(kind);
-      remaining = remaining.replace(re, ' ');
+      if (!found.some((f) => f.kind === kind)) found.push({ kind, index: m.index });
+      remaining =
+        remaining.slice(0, m.index) +
+        ' '.repeat(m[0].length) +
+        remaining.slice(m.index + m[0].length);
     }
   }
-  return found;
+  return found.sort((a, b) => a.index - b.index).map((f) => f.kind);
 }
 
 function findColor(text: string): string | null {

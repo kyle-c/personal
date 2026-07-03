@@ -1,8 +1,9 @@
 # Felix Studio
 
-A working prototype of a **conversational design system**: a studio where product
-designers build and maintain a digital product by talking to the design system
-itself, instead of hand-assembling screens from a static component library.
+A working prototype of a **conversational design system**: a Figma-style studio
+where product designers build and maintain a digital product by talking to the
+design system itself, instead of hand-assembling screens from a static
+component library.
 
 ```bash
 cd felix-studio
@@ -46,17 +47,26 @@ The parser (`src/engine/parser.ts`) is deterministic and offline so the demo
 needs no API key. In a production system an LLM grounded in the design system
 would sit behind the same `Intent` contract.
 
-## Layout
+## The editor
 
-- **Left — Conversation.** Talk to Felix; audits render inline as findings.
-- **Center — Canvas.** "Fieldnote", the sample product, rendered live from
-  Felix primitives. Switch screens in the top bar.
-- **Right — Inspector.** Tokens (live editors), Primitives (the component
-  gallery rendered from current tokens), Changelog (with reverts), Audit
-  (continuous health report).
+The studio is laid out like Figma:
+
+- **Infinite canvas.** Every screen is a frame, all visible at once. Scroll to
+  pan, `⌘/Ctrl + scroll` to zoom, `Space` or the hand tool (`H`) to drag-pan,
+  `Shift+1` / toolbar to zoom-to-fit. Drag a frame's name label to move it.
+- **Selection.** Click a frame or any section inside it (or use the Layers
+  panel). `Esc` deselects, `Delete` removes the selection, `⌘Z` undoes.
+- **Left sidebar.** *Layers* (frames and their sections, with drift warnings)
+  and *Assets* (the Felix primitives rendered live from current tokens).
+- **Right sidebar.** *Design* is context-sensitive — global tokens when nothing
+  is selected, frame properties (rename, delete) for a selected frame, section
+  properties (reorder, fix drift, delete) for a selected section — plus
+  *Changelog* (with per-entry revert) and *Audit* (live health report).
+- **Chat dock.** Felix floats over the canvas, Figma-AI style. Conversation and
+  direct manipulation write to the same store, so both land in the changelog.
 
 State persists to `localStorage`; "Reset demo" starts over. The Dashboard
-screen ships with one deliberately drifted block so the audit has something
+frame ships with one deliberately drifted block so the audit has something
 real to find.
 
 ## A note on sources
