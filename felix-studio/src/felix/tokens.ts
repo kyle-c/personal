@@ -38,6 +38,15 @@ export interface TokenSet {
   shadow: {
     level: 'none' | 'soft' | 'pronounced';
   };
+  /**
+   * Voice tokens — the design system's verbal identity. Conversational
+   * surfaces (chat flows) are styled by these the way visual surfaces are
+   * styled by color and type.
+   */
+  voice: {
+    tone: 'warm' | 'professional' | 'playful';
+    emoji: boolean;
+  };
 }
 
 export const DEFAULT_TOKENS: TokenSet = {
@@ -67,6 +76,10 @@ export const DEFAULT_TOKENS: TokenSet = {
   },
   shadow: {
     level: 'soft',
+  },
+  voice: {
+    tone: 'warm',
+    emoji: false,
   },
 };
 

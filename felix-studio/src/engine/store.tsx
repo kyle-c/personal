@@ -9,68 +9,126 @@ import {
 } from 'react';
 import { DEFAULT_TOKENS, TokenSet } from '../felix/tokens';
 import { runAudit } from './audit';
-import { HELP_TEXT, Intent, parse } from './parser';
+import {
+  generateBlockProps,
+  generateFlowSteps,
+  regenerateBlocks,
+} from './copywriter';
+import { ContentProp, HELP_TEXT, Intent, parse } from './parser';
 import {
   Block,
   BlockKind,
+  Business,
   ChangelogEntry,
+  ChatStep,
   Message,
   Screen,
   Selection,
   StudioState,
+  SurfaceType,
 } from './types';
 
 let idCounter = 0;
 const uid = () => `id-${Date.now().toString(36)}-${(idCounter++).toString(36)}`;
 
-const STORAGE_KEY = 'felix-studio-state-v2';
-const LEGACY_STORAGE_KEY = 'felix-studio-state-v1';
+const STORAGE_KEY = 'felix-studio-state-v3';
 
-/** Frame width on the canvas; matches the Canvas component. */
-export const FRAME_WIDTH = 960;
+/** Frame widths on the canvas, by surface; matches the Canvas component. */
+export const FRAME_WIDTHS: Record<SurfaceType, number> = {
+  web: 960,
+  native: 390,
+  chat: 390,
+};
 const FRAME_GAP = 140;
+
+export const SURFACE_LABELS: Record<SurfaceType, string> = {
+  web: 'Web',
+  native: 'App',
+  chat: 'WhatsApp',
+};
+
+const BLOCK_LABELS: Record<BlockKind, string> = {
+  navbar: 'navigation bar',
+  hero: 'hero',
+  features: 'feature grid',
+  stats: 'stat row',
+  form: 'form',
+  pricing: 'pricing table',
+  testimonial: 'testimonial',
+  table: 'data table',
+  cta: 'call-to-action',
+  footer: 'footer',
+};
+
+export { BLOCK_LABELS };
 
 // ---------------------------------------------------------------------------
 // Seed: a small product already in flight, so the canvas is never empty.
 // ---------------------------------------------------------------------------
 
+const SEED_BUSINESS: Business = {
+  name: 'Fieldnote',
+  industry: 'field journal software for people who work outdoors',
+};
+
+function makeBlocks(kinds: BlockKind[], business: Business): Block[] {
+  return kinds.map((kind) => ({ id: uid(), kind, props: generateBlockProps(kind, business) }));
+}
+
 function seedState(): StudioState {
+  const business = SEED_BUSINESS;
   const home: Screen = {
     id: uid(),
     name: 'Home',
+    surface: 'web',
     x: 0,
     y: 0,
-    blocks: [
-      { id: uid(), kind: 'navbar' },
-      { id: uid(), kind: 'hero' },
-      { id: uid(), kind: 'features' },
-      { id: uid(), kind: 'cta' },
-      { id: uid(), kind: 'footer' },
-    ],
+    steps: [],
+    blocks: makeBlocks(['navbar', 'hero', 'features', 'cta', 'footer'], business),
   };
   const dashboard: Screen = {
     id: uid(),
     name: 'Dashboard',
-    x: FRAME_WIDTH + FRAME_GAP,
+    surface: 'web',
+    x: FRAME_WIDTHS.web + FRAME_GAP,
     y: 0,
-    blocks: [
-      { id: uid(), kind: 'navbar' },
-      { id: uid(), kind: 'stats' },
-      // Deliberate drift for the audit to find — a block that was “hot-fixed”
-      // outside the token system.
-      { id: uid(), kind: 'table', overrides: { background: '#EFEAF9', radius: 2 } },
-    ],
+    steps: [],
+    blocks: makeBlocks(['navbar', 'stats', 'table'], business),
   };
+  // Deliberate drift for the audit to find — a block that was “hot-fixed”
+  // outside the token system.
+  dashboard.blocks[2].overrides = { background: '#EFEAF9', radius: 2 };
+
+  const appHome: Screen = {
+    id: uid(),
+    name: 'App Home',
+    surface: 'native',
+    x: (FRAME_WIDTHS.web + FRAME_GAP) * 2,
+    y: 0,
+    steps: [],
+    blocks: makeBlocks(['navbar', 'hero', 'stats', 'cta'], business),
+  };
+  const support: Screen = {
+    id: uid(),
+    name: 'Support',
+    surface: 'chat',
+    x: (FRAME_WIDTHS.web + FRAME_GAP) * 2 + FRAME_WIDTHS.native + FRAME_GAP,
+    y: 0,
+    blocks: [],
+    steps: generateFlowSteps(business, DEFAULT_TOKENS.voice, uid),
+  };
+
   return {
+    business,
     tokens: DEFAULT_TOKENS,
-    screens: [home, dashboard],
+    screens: [home, dashboard, appHome, support],
     selection: { kind: 'none' },
     messages: [
       {
         id: uid(),
         role: 'felix',
         text:
-          'Hi, I’m Felix — your design system, in conversation. Every frame on this canvas is composed from my tokens and primitives, so we can build and restyle the product together just by talking.\n\nTry: “create a pricing page with a hero and pricing table”, “change the primary color to forest green”, “make everything rounder”, or “audit the product”. Type “help” for the full range.\n\nCanvas basics: scroll to pan, ⌘/Ctrl + scroll to zoom, click a frame or a section to select it.',
+          'Hi, I’m Felix — your design system, in conversation. This canvas holds one product on three surfaces: web pages, an app screen, and a WhatsApp flow — all generated from one business profile, one token set, one voice.\n\nThe fastest way to feel it: say “this is a dental clinic called Brightside” and watch every surface rewrite itself. Or try “create a whatsapp flow for orders”, “change the headline to …”, “make the tone playful”, “audit the product”, “export the code”. Type “help” for everything.\n\nCanvas basics: scroll to pan, ⌘/Ctrl + scroll to zoom, click any frame, section or chat step to select it.',
       },
     ],
     changelog: [],
@@ -89,8 +147,13 @@ type Action =
   | { type: 'delete-block'; screenId: string; blockId: string }
   | { type: 'shift-block'; screenId: string; blockId: string; dir: -1 | 1 }
   | { type: 'clear-overrides'; screenId: string; blockId: string }
+  | { type: 'set-block-props'; screenId: string; blockId: string; props: Block['props']; summary: string }
+  | { type: 'edit-step'; screenId: string; stepId: string; patch: Partial<ChatStep>; summary: string }
+  | { type: 'add-step'; screenId: string }
+  | { type: 'delete-step'; screenId: string; stepId: string }
   | { type: 'undo' }
   | { type: 'set-tokens-direct'; tokens: TokenSet; summary: string }
+  | { type: 'set-business-direct'; business: Business; regenerate: boolean }
   | { type: 'revert-to'; entryId: string }
   | { type: 'reset' };
 
@@ -98,6 +161,7 @@ function snapshot(state: StudioState): ChangelogEntry['before'] {
   return {
     tokens: JSON.parse(JSON.stringify(state.tokens)),
     screens: JSON.parse(JSON.stringify(state.screens)),
+    business: JSON.parse(JSON.stringify(state.business)),
   };
 }
 
@@ -120,6 +184,7 @@ function withChange(
     ...state,
     tokens: JSON.parse(JSON.stringify(state.tokens)),
     screens: JSON.parse(JSON.stringify(state.screens)),
+    business: JSON.parse(JSON.stringify(state.business)),
   };
   mutate(draft);
   return { ...draft, changelog: [entry, ...state.changelog] };
@@ -128,7 +193,9 @@ function withChange(
 /** The screen the conversation refers to when none is named: the selected one. */
 function contextScreen(state: StudioState): Screen | undefined {
   if (state.selection.kind !== 'none') {
-    const hit = state.screens.find((s) => s.id === (state.selection as { screenId: string }).screenId);
+    const hit = state.screens.find(
+      (s) => s.id === (state.selection as { screenId: string }).screenId,
+    );
     if (hit) return hit;
   }
   return state.screens[0];
@@ -146,24 +213,9 @@ function findScreen(state: StudioState, ref?: string): Screen | undefined {
 /** Where the next created frame goes: right of the rightmost frame. */
 function nextFramePosition(screens: Screen[]): { x: number; y: number } {
   if (screens.length === 0) return { x: 0, y: 0 };
-  const maxX = Math.max(...screens.map((s) => s.x));
-  return { x: maxX + FRAME_WIDTH + FRAME_GAP, y: Math.min(...screens.map((s) => s.y)) };
+  const maxRight = Math.max(...screens.map((s) => s.x + FRAME_WIDTHS[s.surface]));
+  return { x: maxRight + FRAME_GAP, y: Math.min(...screens.map((s) => s.y)) };
 }
-
-const BLOCK_LABELS: Record<BlockKind, string> = {
-  navbar: 'navigation bar',
-  hero: 'hero',
-  features: 'feature grid',
-  stats: 'stat row',
-  form: 'form',
-  pricing: 'pricing table',
-  testimonial: 'testimonial',
-  table: 'data table',
-  cta: 'call-to-action',
-  footer: 'footer',
-};
-
-export { BLOCK_LABELS };
 
 function reply(state: StudioState, text: string, audit?: Message['audit']): StudioState {
   return {
@@ -179,6 +231,7 @@ function applyUndo(state: StudioState): StudioState {
     ...state,
     tokens: last.before.tokens,
     screens: last.before.screens,
+    business: last.before.business ?? state.business,
     changelog: state.changelog.slice(1),
   };
   return reply(sanitizeSelection(reverted), `Reverted “${last.summary}”.`);
@@ -193,13 +246,33 @@ function sanitizeSelection(state: StudioState): StudioState {
   if (sel.kind === 'block' && !screen.blocks.some((b) => b.id === sel.blockId)) {
     return { ...state, selection: { kind: 'screen', screenId: screen.id } };
   }
+  if (sel.kind === 'step' && !screen.steps.some((s) => s.id === sel.stepId)) {
+    return { ...state, selection: { kind: 'screen', screenId: screen.id } };
+  }
   return state;
 }
+
+/** Which prop key and block kinds a spoken content word maps to. */
+const PROP_TARGETS: Record<ContentProp, { key: keyof Block['props']; kinds: BlockKind[] }> = {
+  headline: { key: 'headline', kinds: ['hero', 'cta'] },
+  subhead: { key: 'subhead', kinds: ['hero', 'cta'] },
+  badge: { key: 'badge', kinds: ['hero'] },
+  brand: { key: 'brand', kinds: ['navbar', 'footer'] },
+  quote: { key: 'quote', kinds: ['testimonial'] },
+  title: { key: 'title', kinds: ['form'] },
+  button: { key: 'primaryCta', kinds: ['hero', 'cta'] },
+};
 
 function executeIntent(state: StudioState, intent: Intent): StudioState {
   switch (intent.type) {
     case 'help':
       return reply(state, HELP_TEXT);
+
+    case 'export':
+      return reply(
+        state,
+        'Use the Export button in the toolbar (top right) — it generates real artifacts per surface: a standalone HTML page for web screens, a React Native component for app screens, and a WhatsApp-style flow definition (JSON) for chat flows. Copy or download each one.',
+      );
 
     case 'audit': {
       const findings = runAudit(state.tokens, state.screens);
@@ -207,8 +280,8 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       const warnings = findings.filter((f) => f.severity === 'warning').length;
       const headline =
         issues + warnings === 0 || findings[0]?.severity === 'ok'
-          ? 'I walked every frame — the product is healthy.'
-          : `I walked every frame and found ${issues} issue${issues === 1 ? '' : 's'} and ${warnings} warning${warnings === 1 ? '' : 's'}:`;
+          ? 'I walked every surface — the product is healthy.'
+          : `I walked every surface and found ${issues} issue${issues === 1 ? '' : 's'} and ${warnings} warning${warnings === 1 ? '' : 's'}:`;
       return reply(state, headline, findings);
     }
 
@@ -233,34 +306,172 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
     case 'undo':
       return applyUndo(state);
 
+    case 'set-business': {
+      const name = intent.name ?? state.business.name;
+      const industry = intent.industry ?? state.business.industry;
+      if (name === state.business.name && industry === state.business.industry) {
+        return reply(state, `The product is already set up as ${name} (${industry}).`);
+      }
+      const business: Business = { name, industry };
+      const next = withChange(
+        state,
+        'brand',
+        `Rebranded to ${name}`,
+        industry !== state.business.industry ? industry : undefined,
+        (draft) => {
+          draft.business = business;
+          for (const screen of draft.screens) {
+            screen.blocks = regenerateBlocks(screen.blocks, business);
+            if (screen.surface === 'chat') {
+              screen.steps = generateFlowSteps(business, draft.tokens.voice, uid);
+            }
+          }
+        },
+      );
+      return reply(
+        next,
+        `Done — the product is now ${name}${intent.industry ? `, a ${industry}` : ''}. I rewrote every headline, feature, pricing tier, form and chat flow across all ${state.screens.length} frames from the new profile. Structure and tokens stayed put; only the content changed. Say “undo” if the old brand should come back.`,
+      );
+    }
+
+    case 'rewrite-copy': {
+      const target = intent.screenName ? findScreen(state, intent.screenName) : undefined;
+      const next = withChange(
+        state,
+        'brand',
+        target ? `Rewrote copy on “${target.name}”` : 'Rewrote copy across the product',
+        undefined,
+        (draft) => {
+          for (const screen of draft.screens) {
+            if (target && screen.id !== target.id) continue;
+            screen.blocks = regenerateBlocks(screen.blocks, draft.business);
+            if (screen.surface === 'chat') {
+              screen.steps = generateFlowSteps(draft.business, draft.tokens.voice, uid);
+            }
+          }
+        },
+      );
+      return reply(
+        next,
+        target
+          ? `Refreshed the copy on “${target.name}” from the ${state.business.name} profile.`
+          : `Refreshed every headline, feature and chat message from the ${state.business.name} profile.`,
+      );
+    }
+
+    case 'set-prop': {
+      const target = PROP_TARGETS[intent.prop];
+      const sel = state.selection;
+      let screen: Screen | undefined;
+      let block: Block | undefined;
+      // Prefer the selected block when it can hold this prop.
+      if (sel.kind === 'block') {
+        const s = state.screens.find((sc) => sc.id === sel.screenId);
+        const b = s?.blocks.find((bl) => bl.id === sel.blockId);
+        if (s && b && target.kinds.includes(b.kind)) {
+          screen = s;
+          block = b;
+        }
+      }
+      if (!block) {
+        screen = findScreen(state, intent.screenName);
+        block = screen?.blocks.find((b) => target.kinds.includes(b.kind));
+        if (!block) {
+          for (const s of state.screens) {
+            const hit = s.blocks.find((b) => target.kinds.includes(b.kind));
+            if (hit) {
+              screen = s;
+              block = hit;
+              break;
+            }
+          }
+        }
+      }
+      if (!screen || !block) {
+        return reply(state, `I couldn’t find a section with a ${intent.prop} to change. Select the section first, or tell me which page it’s on.`);
+      }
+      const screenId = screen.id;
+      const blockId = block.id;
+      const next = withChange(
+        state,
+        'screen',
+        `Changed ${intent.prop} on “${screen.name}”`,
+        `→ “${intent.value}”`,
+        (draft) => {
+          const b = draft.screens.find((s) => s.id === screenId)!.blocks.find((bl) => bl.id === blockId)!;
+          (b.props[target.key] as string) = intent.value;
+        },
+      );
+      return reply(next, `Updated the ${intent.prop} on “${screen.name}” to “${intent.value}”.`);
+    }
+
+    case 'set-voice': {
+      const tone = intent.tone ?? state.tokens.voice.tone;
+      const emoji = intent.emoji ?? state.tokens.voice.emoji;
+      if (tone === state.tokens.voice.tone && emoji === state.tokens.voice.emoji) {
+        return reply(state, `The voice is already ${tone}${emoji ? ' with emoji' : ''}.`);
+      }
+      const next = withChange(
+        state,
+        'token',
+        `Set voice to ${tone}${emoji ? ' + emoji' : intent.emoji === false ? ', no emoji' : ''}`,
+        undefined,
+        (draft) => {
+          draft.tokens.voice = { tone, emoji };
+          // Voice is a token: regenerate conversational surfaces from it.
+          for (const screen of draft.screens) {
+            if (screen.surface === 'chat') {
+              screen.steps = generateFlowSteps(draft.business, { tone, emoji }, uid);
+            }
+          }
+        },
+      );
+      return reply(
+        next,
+        `Voice tokens updated: ${tone}${emoji ? ', emoji on' : intent.emoji === false ? ', emoji off' : ''}. Chat flows were regenerated in the new voice — visual surfaces keep their copy until you say “rewrite the copy”.`,
+      );
+    }
+
     case 'create-screen': {
-      const existing = findScreen(state, intent.name);
-      if (existing && existing.name.toLowerCase() === intent.name.toLowerCase()) {
+      const existing = state.screens.find((s) => s.name.toLowerCase() === intent.name.toLowerCase());
+      if (existing) {
         return reply(state, `There’s already a “${existing.name}” frame — say “add a hero to the ${existing.name.toLowerCase()} page” to keep building it.`);
       }
-      const blocks: BlockKind[] =
-        intent.blocks.length > 0 ? intent.blocks : ['navbar', 'hero', 'footer'];
-      const ordered = orderBlocks(blocks);
       const pos = nextFramePosition(state.screens);
       const screen: Screen = {
         id: uid(),
         name: intent.name,
+        surface: intent.surface,
         x: pos.x,
         y: pos.y,
-        blocks: ordered.map((kind) => ({ id: uid(), kind })),
+        blocks: [],
+        steps: [],
       };
+      let describe = '';
+      if (intent.surface === 'chat') {
+        screen.steps = generateFlowSteps(state.business, state.tokens.voice, uid);
+        describe = `a WhatsApp flow with ${screen.steps.length} steps (welcome, actions, info, human handoff), written in the ${state.tokens.voice.tone} voice`;
+      } else {
+        const kinds: BlockKind[] =
+          intent.blocks.length > 0
+            ? orderBlocks(intent.blocks)
+            : intent.surface === 'native'
+              ? ['navbar', 'hero', 'cta']
+              : ['navbar', 'hero', 'footer'];
+        screen.blocks = makeBlocks(kinds, state.business);
+        describe = `${kinds.length} section${kinds.length === 1 ? '' : 's'} (${kinds.map((k) => BLOCK_LABELS[k]).join(', ')}), with copy generated for ${state.business.name}`;
+      }
       const next = withChange(
         state,
         'screen',
-        `Created “${intent.name}” screen`,
-        `Composed from: ${ordered.map((k) => BLOCK_LABELS[k]).join(', ')}`,
+        `Created “${intent.name}” ${SURFACE_LABELS[intent.surface]} frame`,
+        undefined,
         (draft) => {
           draft.screens.push(screen);
           draft.selection = { kind: 'screen', screenId: screen.id };
         },
       );
-      const auto = intent.blocks.length === 0 ? ' I started it with a navbar, hero and footer — tell me what to add next.' : '';
-      return reply(next, `Created the “${intent.name}” frame with ${ordered.length} section${ordered.length === 1 ? '' : 's'}, all composed from Felix primitives. It’s on the canvas to the right.${auto}`);
+      return reply(next, `Created the “${intent.name}” ${SURFACE_LABELS[intent.surface]} frame with ${describe}. It’s on the canvas to the right.`);
     }
 
     case 'remove-screen': {
@@ -272,7 +483,7 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       const next = withChange(state, 'screen', `Removed “${screen.name}” screen`, undefined, (draft) => {
         draft.screens = draft.screens.filter((s) => s.id !== screen.id);
       });
-      return reply(sanitizeSelection(next), `Removed the “${screen.name}” frame. Its blocks are gone, but “undo” brings it back.`);
+      return reply(sanitizeSelection(next), `Removed the “${screen.name}” frame. Its contents are gone, but “undo” brings it back.`);
     }
 
     case 'add-block': {
@@ -280,7 +491,9 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       if (!screen) {
         return reply(state, `I couldn’t find a frame matching “${intent.screenName}”. Which screen should this go on?`);
       }
-      let newBlockId = '';
+      if (screen.surface === 'chat') {
+        return reply(state, `“${screen.name}” is a chat flow — it takes steps, not sections. Select it and use “Add step”, or create the ${BLOCK_LABELS[intent.block]} on a web or app screen.`);
+      }
       const next = withChange(
         state,
         'screen',
@@ -288,24 +501,22 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
         undefined,
         (draft) => {
           const target = draft.screens.find((s) => s.id === screen.id)!;
-          const block: Block = { id: uid(), kind: intent.block };
-          newBlockId = block.id;
+          const block: Block = {
+            id: uid(),
+            kind: intent.block,
+            props: generateBlockProps(intent.block, draft.business),
+          };
           insertBlock(target, block);
           draft.selection = { kind: 'block', screenId: target.id, blockId: block.id };
         },
       );
-      void newBlockId;
-      return reply(next, `Added a ${BLOCK_LABELS[intent.block]} to “${screen.name}”. It reads straight from the tokens, so it already matches everything else.`);
+      return reply(next, `Added a ${BLOCK_LABELS[intent.block]} to “${screen.name}”, with copy written for ${state.business.name}. It reads straight from the tokens, so it already matches everything else.`);
     }
 
     case 'remove-block': {
-      // If a block of this kind is selected, prefer that exact one.
       const sel = state.selection;
       let screen = findScreen(state, intent.screenName);
-      if (
-        !intent.screenName &&
-        sel.kind === 'block'
-      ) {
+      if (!intent.screenName && sel.kind === 'block') {
         const selScreen = state.screens.find((s) => s.id === sel.screenId);
         const selBlock = selScreen?.blocks.find((b) => b.id === sel.blockId);
         if (selScreen && selBlock?.kind === intent.block) screen = selScreen;
@@ -349,7 +560,7 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
           (f.title.toLowerCase().includes('contrast') || f.title.toLowerCase().includes('read')),
       );
       const caveat = audit.length > 0 ? ` One heads-up: ${audit[0].detail}` : '';
-      return reply(next, `Updated the ${intent.slot} color token to ${intent.value}. Every frame that uses it just changed with it — that’s the point of a single source of truth.${caveat}`);
+      return reply(next, `Updated the ${intent.slot} color token to ${intent.value}. Every surface that uses it just changed with it — that’s the point of a single source of truth.${caveat}`);
     }
 
     case 'set-radius': {
@@ -366,7 +577,7 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       const next = withChange(state, 'token', 'Adjusted corner radius', `${current}px → ${value}px`, (draft) => {
         draft.tokens.radius.base = value;
       });
-      return reply(next, `Corner radius is now ${value}px across buttons, inputs and cards.`);
+      return reply(next, `Corner radius is now ${value}px across buttons, inputs, cards and chat bubbles.`);
     }
 
     case 'set-density': {
@@ -410,7 +621,7 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
     case 'unknown':
       return reply(
         state,
-        'I didn’t catch a design intent in that. I can build screens, restyle tokens, audit for drift, and undo changes — type “help” to see phrasings I understand.',
+        'I didn’t catch a design intent in that. I can rebrand the product for any business, build screens and chat flows, edit content, restyle tokens, audit for drift, and export code — type “help” to see phrasings I understand.',
       );
   }
 }
@@ -528,12 +739,78 @@ function reducer(state: StudioState, action: Action): StudioState {
       );
     }
 
+    case 'set-block-props': {
+      const screen = state.screens.find((s) => s.id === action.screenId);
+      const block = screen?.blocks.find((b) => b.id === action.blockId);
+      if (!screen || !block) return state;
+      if (JSON.stringify(block.props) === JSON.stringify(action.props)) return state;
+      return withChange(state, 'screen', action.summary, undefined, (draft) => {
+        const b = draft.screens
+          .find((s) => s.id === action.screenId)!
+          .blocks.find((bl) => bl.id === action.blockId)!;
+        b.props = action.props;
+      });
+    }
+
+    case 'edit-step': {
+      const screen = state.screens.find((s) => s.id === action.screenId);
+      const step = screen?.steps.find((s) => s.id === action.stepId);
+      if (!screen || !step) return state;
+      return withChange(state, 'screen', action.summary, undefined, (draft) => {
+        const t = draft.screens
+          .find((s) => s.id === action.screenId)!
+          .steps.find((s) => s.id === action.stepId)!;
+        Object.assign(t, action.patch);
+      });
+    }
+
+    case 'add-step': {
+      const screen = state.screens.find((s) => s.id === action.screenId);
+      if (!screen || screen.surface !== 'chat') return state;
+      const stepId = uid();
+      const next = withChange(state, 'screen', `Added step to “${screen.name}”`, undefined, (draft) => {
+        const t = draft.screens.find((s) => s.id === action.screenId)!;
+        t.steps.push({
+          id: stepId,
+          name: `Step ${t.steps.length + 1}`,
+          message: 'New message — edit me in the inspector.',
+          replies: [{ label: 'Back to start', goTo: t.steps[0]?.id }],
+        });
+      });
+      return { ...next, selection: { kind: 'step', screenId: screen.id, stepId } };
+    }
+
+    case 'delete-step': {
+      const screen = state.screens.find((s) => s.id === action.screenId);
+      const step = screen?.steps.find((s) => s.id === action.stepId);
+      if (!screen || !step) return state;
+      const next = withChange(state, 'screen', `Removed step “${step.name}” from “${screen.name}”`, undefined, (draft) => {
+        const t = draft.screens.find((s) => s.id === action.screenId)!;
+        t.steps = t.steps.filter((s) => s.id !== action.stepId);
+      });
+      return sanitizeSelection(next);
+    }
+
     case 'undo':
       return applyUndo(state);
 
     case 'set-tokens-direct': {
       return withChange(state, 'token', action.summary, undefined, (draft) => {
         draft.tokens = action.tokens;
+      });
+    }
+
+    case 'set-business-direct': {
+      return withChange(state, 'brand', `Updated business profile: ${action.business.name}`, action.business.industry, (draft) => {
+        draft.business = action.business;
+        if (action.regenerate) {
+          for (const screen of draft.screens) {
+            screen.blocks = regenerateBlocks(screen.blocks, action.business);
+            if (screen.surface === 'chat') {
+              screen.steps = generateFlowSteps(action.business, draft.tokens.voice, uid);
+            }
+          }
+        }
       });
     }
 
@@ -545,6 +822,7 @@ function reducer(state: StudioState, action: Action): StudioState {
         ...state,
         tokens: entry.before.tokens,
         screens: entry.before.screens,
+        business: entry.before.business ?? state.business,
         changelog: state.changelog.slice(idx + 1),
       };
       return reply(
@@ -576,32 +854,16 @@ function loadInitial(): StudioState {
       const parsed = JSON.parse(raw) as StudioState;
       if (
         parsed.tokens &&
+        parsed.business &&
         Array.isArray(parsed.screens) &&
         parsed.screens.length > 0 &&
-        typeof parsed.screens[0].x === 'number'
+        parsed.screens[0].surface !== undefined
       ) {
         return { ...parsed, selection: parsed.selection ?? { kind: 'none' } };
       }
     }
-    // Migrate a pre-canvas (v1) save: lay its screens out left to right.
-    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (legacy) {
-      const parsed = JSON.parse(legacy) as StudioState & { activeScreenId?: string };
-      if (parsed.tokens && Array.isArray(parsed.screens) && parsed.screens.length > 0) {
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
-        return {
-          tokens: parsed.tokens,
-          screens: parsed.screens.map((s, i) => ({
-            ...s,
-            x: i * (FRAME_WIDTH + FRAME_GAP),
-            y: 0,
-          })),
-          selection: { kind: 'none' },
-          messages: parsed.messages ?? [],
-          changelog: [],
-        };
-      }
-    }
+    // Pre-multisurface saves (v1/v2) had hard-coded Fieldnote content and no
+    // business profile — their structure can't carry forward, so reseed.
   } catch {
     // fall through to seed
   }

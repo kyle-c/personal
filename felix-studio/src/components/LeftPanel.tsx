@@ -3,18 +3,21 @@ import {
   AlertTriangle,
   CreditCard,
   Frame as FrameIcon,
+  Globe,
   LayoutGrid,
   LayoutPanelTop,
   ListOrdered,
   Megaphone,
+  MessageCircle,
   MessageSquareQuote,
   Navigation,
   PanelBottom,
+  Smartphone,
   Table2,
   TextCursorInput,
 } from 'lucide-react';
-import { BLOCK_LABELS, useStudio } from '../engine/store';
-import { BlockKind } from '../engine/types';
+import { BLOCK_LABELS, SURFACE_LABELS, useStudio } from '../engine/store';
+import { BlockKind, Screen, SurfaceType } from '../engine/types';
 import { tokensToCssVars } from '../felix/tokens';
 import {
   FBadge,
@@ -39,59 +42,97 @@ const BLOCK_ICONS: Record<BlockKind, typeof FrameIcon> = {
   footer: PanelBottom,
 };
 
-function LayersTab() {
+const SURFACE_ICONS: Record<SurfaceType, typeof Globe> = {
+  web: Globe,
+  native: Smartphone,
+  chat: MessageCircle,
+};
+
+function ScreenRows({ screen }: { screen: Screen }) {
   const { state, dispatch } = useStudio();
   const sel = state.selection;
+  const screenSelected = sel.kind === 'screen' && sel.screenId === screen.id;
+  return (
+    <div className="mb-0.5">
+      <button
+        onClick={() => dispatch({ type: 'select', selection: { kind: 'screen', screenId: screen.id } })}
+        className={
+          'flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[13px] font-medium ' +
+          (screenSelected ? 'bg-blue-50 text-blue-700' : 'text-stone-700 hover:bg-stone-100')
+        }
+      >
+        <FrameIcon size={13} className={screenSelected ? 'text-blue-500' : 'text-stone-400'} />
+        {screen.name}
+      </button>
+      {screen.surface === 'chat'
+        ? screen.steps.map((step) => {
+            const stepSelected = sel.kind === 'step' && sel.stepId === step.id;
+            return (
+              <button
+                key={step.id}
+                onClick={() =>
+                  dispatch({ type: 'select', selection: { kind: 'step', screenId: screen.id, stepId: step.id } })
+                }
+                className={
+                  'flex w-full items-center gap-1.5 py-1 pl-8 pr-3 text-left text-xs ' +
+                  (stepSelected ? 'bg-blue-50 text-blue-700' : 'text-stone-500 hover:bg-stone-100')
+                }
+              >
+                <MessageCircle size={12} className={stepSelected ? 'text-blue-500' : 'text-stone-400'} />
+                {step.name}
+              </button>
+            );
+          })
+        : screen.blocks.map((block) => {
+            const Icon = BLOCK_ICONS[block.kind];
+            const blockSelected = sel.kind === 'block' && sel.blockId === block.id;
+            return (
+              <button
+                key={block.id}
+                onClick={() =>
+                  dispatch({ type: 'select', selection: { kind: 'block', screenId: screen.id, blockId: block.id } })
+                }
+                className={
+                  'flex w-full items-center gap-1.5 py-1 pl-8 pr-3 text-left text-xs ' +
+                  (blockSelected ? 'bg-blue-50 text-blue-700' : 'text-stone-500 hover:bg-stone-100')
+                }
+              >
+                <Icon size={12} className={blockSelected ? 'text-blue-500' : 'text-stone-400'} />
+                <span className="capitalize">{BLOCK_LABELS[block.kind]}</span>
+                {block.overrides && (
+                  <AlertTriangle size={11} className="ml-auto text-amber-500" aria-label="Token drift" />
+                )}
+              </button>
+            );
+          })}
+    </div>
+  );
+}
+
+function LayersTab() {
+  const { state } = useStudio();
+  const surfaces: SurfaceType[] = ['web', 'native', 'chat'];
   return (
     <div className="py-2">
-      {state.screens.map((screen) => {
-        const screenSelected = sel.kind === 'screen' && sel.screenId === screen.id;
+      {surfaces.map((surface) => {
+        const screens = state.screens.filter((s) => s.surface === surface);
+        if (screens.length === 0) return null;
+        const Icon = SURFACE_ICONS[surface];
         return (
-          <div key={screen.id} className="mb-1">
-            <button
-              onClick={() =>
-                dispatch({ type: 'select', selection: { kind: 'screen', screenId: screen.id } })
-              }
-              className={
-                'flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[13px] font-medium ' +
-                (screenSelected ? 'bg-blue-50 text-blue-700' : 'text-stone-700 hover:bg-stone-100')
-              }
-            >
-              <FrameIcon size={13} className={screenSelected ? 'text-blue-500' : 'text-stone-400'} />
-              {screen.name}
-            </button>
-            <div>
-              {screen.blocks.map((block) => {
-                const Icon = BLOCK_ICONS[block.kind];
-                const blockSelected = sel.kind === 'block' && sel.blockId === block.id;
-                return (
-                  <button
-                    key={block.id}
-                    onClick={() =>
-                      dispatch({
-                        type: 'select',
-                        selection: { kind: 'block', screenId: screen.id, blockId: block.id },
-                      })
-                    }
-                    className={
-                      'flex w-full items-center gap-1.5 py-1 pl-8 pr-3 text-left text-xs ' +
-                      (blockSelected ? 'bg-blue-50 text-blue-700' : 'text-stone-500 hover:bg-stone-100')
-                    }
-                  >
-                    <Icon size={12} className={blockSelected ? 'text-blue-500' : 'text-stone-400'} />
-                    <span className="capitalize">{BLOCK_LABELS[block.kind]}</span>
-                    {block.overrides && (
-                      <AlertTriangle size={11} className="ml-auto text-amber-500" aria-label="Token drift" />
-                    )}
-                  </button>
-                );
-              })}
+          <div key={surface} className="mb-2">
+            <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-stone-400">
+              <Icon size={11} />
+              {SURFACE_LABELS[surface]}
             </div>
+            {screens.map((screen) => (
+              <ScreenRows key={screen.id} screen={screen} />
+            ))}
           </div>
         );
       })}
-      <p className="px-3 pt-2 text-[11px] leading-relaxed text-stone-400">
-        Ask Felix for new frames and sections — “create a settings page with a form”.
+      <p className="px-3 pt-1 text-[11px] leading-relaxed text-stone-400">
+        Ask Felix for new frames — “create a settings page with a form”, “create an app
+        screen for booking”, “create a whatsapp flow for orders”.
       </p>
     </div>
   );

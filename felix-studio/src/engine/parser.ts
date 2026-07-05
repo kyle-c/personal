@@ -5,18 +5,32 @@
  * would sit; the contract (Intent) would stay the same.
  */
 import { NAMED_COLORS } from '../felix/tokens';
-import { BlockKind } from './types';
+import { BlockKind, SurfaceType } from './types';
+
+export type ContentProp =
+  | 'headline'
+  | 'subhead'
+  | 'badge'
+  | 'brand'
+  | 'quote'
+  | 'title'
+  | 'button';
 
 export type Intent =
-  | { type: 'create-screen'; name: string; blocks: BlockKind[] }
+  | { type: 'create-screen'; name: string; blocks: BlockKind[]; surface: SurfaceType }
   | { type: 'add-block'; block: BlockKind; screenName?: string }
   | { type: 'remove-block'; block: BlockKind; screenName?: string }
   | { type: 'remove-screen'; screenName: string }
+  | { type: 'set-business'; name?: string; industry?: string }
+  | { type: 'rewrite-copy'; screenName?: string }
+  | { type: 'set-prop'; prop: ContentProp; value: string; screenName?: string }
+  | { type: 'set-voice'; tone?: 'warm' | 'professional' | 'playful'; emoji?: boolean }
   | { type: 'set-color'; slot: 'primary' | 'background' | 'ink'; value: string }
   | { type: 'set-radius'; direction: 'rounder' | 'sharper' | 'set'; value?: number }
   | { type: 'set-density'; density: 'compact' | 'comfortable' | 'spacious' }
   | { type: 'set-shadow'; level: 'none' | 'soft' | 'pronounced' }
   | { type: 'set-font'; slot: 'display' | 'body'; family: string }
+  | { type: 'export' }
   | { type: 'audit' }
   | { type: 'fix-drift' }
   | { type: 'undo' }
@@ -92,8 +106,22 @@ function findColor(text: string): string | null {
 
 /** Extract a screen name from phrases like `on the pricing page` / `to settings`. */
 function findScreenRef(text: string): string | undefined {
-  const m = text.match(/(?:on|to|from|in)\s+(?:the\s+)?([\w\s-]+?)\s+(?:page|screen)/i);
+  const m = text.match(/(?:on|to|from|in)\s+(?:the\s+)?([\w\s-]+?)\s+(?:page|screen|flow)/i);
   return m ? m[1].trim() : undefined;
+}
+
+function detectSurface(text: string): SurfaceType {
+  if (/\b(whatsapp|chat\s?bot|chat\s?flow|sms|messag(?:e|ing)\s+flow|conversation(?:al)?\s+flow)\b/i.test(text)) {
+    return 'chat';
+  }
+  if (/\b(native|mobile|ios|android|app)\s+(page|screen|home|view)\b/i.test(text) || /\bapp screen\b/i.test(text)) {
+    return 'native';
+  }
+  return 'web';
+}
+
+function stripQuotes(s: string): string {
+  return s.replace(/^["'“”]+|["'“”.]+$/g, '').trim();
 }
 
 export function parse(inputRaw: string): Intent {
@@ -104,7 +132,66 @@ export function parse(inputRaw: string): Intent {
   if (/\b(fix|repair|clean|resolve)\b.*\bdrift\b/.test(lower) || /\bsnap\b.*\btokens?\b/.test(lower)) {
     return { type: 'fix-drift' };
   }
-  if (/\b(undo|revert|roll ?back)\b/.test(lower)) return { type: 'undo' };
+  if (/\b(undo|roll ?back)\b/.test(lower) || /^revert\b/.test(lower)) return { type: 'undo' };
+  if (/\bexport\b|\bship it\b|\bgenerate (the )?code\b/.test(lower)) return { type: 'export' };
+
+  // --- Brand / business ----------------------------------------------------
+  // "this is a dental clinic called Brightside", "set up for a bakery named Crumb",
+  // "we're a climbing gym", "rebrand to Alpine".
+  const rebrand = input.match(/\brebrand\s+(?:to|as)\s+(.+)/i);
+  if (rebrand) return { type: 'set-business', name: stripQuotes(rebrand[1]) };
+  const bizMatch = input.match(
+    /\b(?:this is|set ?up for|we(?:'| a)?re|i'?m building|build (?:this )?for|make (?:this|it) for)\s+(?:now\s+)?(?:a|an)\s+(.+?)(?:\s+(?:called|named)\s+(.+))?$/i,
+  );
+  if (bizMatch && !/\b(page|screen|flow|block|section|color|colour|font)\b/i.test(bizMatch[1])) {
+    const industry = stripQuotes(bizMatch[1]);
+    const name = bizMatch[2] ? stripQuotes(bizMatch[2]) : undefined;
+    return { type: 'set-business', industry, name };
+  }
+
+  // "rewrite the copy", "regenerate the content on the home page"
+  if (/\b(rewrite|regenerate|refresh|redo)\b.*\b(copy|content|text|words)\b/.test(lower)) {
+    return { type: 'rewrite-copy', screenName: findScreenRef(lower) };
+  }
+
+  // --- Content edits: change the headline to "..." --------------------------
+  const propMatch = input.match(
+    /\b(?:change|set|update|make)\s+the\s+(headline|sub-?head(?:ing)?|badge|brand|quote|title|button)\b[^]*?\bto\s+(.+)$/i,
+  );
+  if (propMatch) {
+    const word = propMatch[1].toLowerCase().replace(/-/g, '');
+    const prop: ContentProp =
+      word.startsWith('subhead') ? 'subhead'
+      : word === 'headline' ? 'headline'
+      : word === 'badge' ? 'badge'
+      : word === 'brand' ? 'brand'
+      : word === 'quote' ? 'quote'
+      : word === 'title' ? 'title'
+      : 'button';
+    const value = stripQuotes(propMatch[2]);
+    // Guard: "change the primary color to red" is not a content edit.
+    if (!/\b(color|colour)\b/i.test(input) && value) {
+      return { type: 'set-prop', prop, value, screenName: findScreenRef(lower) };
+    }
+  }
+
+  // --- Voice ----------------------------------------------------------------
+  if (/\b(voice|tone)\b/.test(lower) || /\bemoji/.test(lower)) {
+    const tone = /\bplayful|fun|cheeky\b/.test(lower)
+      ? ('playful' as const)
+      : /\bprofessional|formal|serious\b/.test(lower)
+        ? ('professional' as const)
+        : /\bwarm|friendly|casual\b/.test(lower)
+          ? ('warm' as const)
+          : undefined;
+    const emoji = /\b(use|add|with|enable)\b.*\bemoji/.test(lower)
+      ? true
+      : /\b(no|remove|drop|without|disable)\b.*\bemoji/.test(lower)
+        ? false
+        : undefined;
+    if (tone !== undefined || emoji !== undefined) return { type: 'set-voice', tone, emoji };
+  }
+
   if (/\b(audit|drift|review|check|inspect|health)\b/.test(lower) && !/\bcheckbox\b/.test(lower)) {
     return { type: 'audit' };
   }
@@ -122,13 +209,13 @@ export function parse(inputRaw: string): Intent {
   // "make the buttons purple" — color word without the word "color"
   if (/\b(make|turn|paint|set)\b/.test(lower)) {
     const value = findColor(lower);
-    if (value && !/\bpage|screen|form|hero|table|pricing\b/.test(lower)) {
+    if (value && !/\bpage|screen|flow|form|hero|table|pricing\b/.test(lower)) {
       const slot = /\bbackground\b/.test(lower) ? 'background' : 'primary';
       return { type: 'set-color', slot, value };
     }
   }
 
-  if (/\b(rounder|more rounded|softer corners|friendlier)\b/.test(lower)) {
+  if (/\b(rounder|more rounded|softer corners|friendlier corners)\b/.test(lower)) {
     return { type: 'set-radius', direction: 'rounder' };
   }
   if (/\b(sharper|less rounded|square|crisper corners)\b/.test(lower)) {
@@ -168,21 +255,26 @@ export function parse(inputRaw: string): Intent {
 
   // --- Screen intents ------------------------------------------------------
   const createMatch = lower.match(
-    /\b(?:create|add|make|build|new)\b.*?\b(?:a\s+|an\s+|the\s+)?([\w\s-]+?)\s+(?:page|screen)\b/i,
+    /\b(?:create|add|make|build|new)\b.*?\b(?:a\s+|an\s+|the\s+)?([\w\s-]+?)\s+(?:page|screen|flow|bot)\b/i,
   );
   if (createMatch && /\b(create|make|build|new|add)\b/.test(lower)) {
-    const name = createMatch[1]
-      .replace(/\b(new|a|an|the)\b/gi, '')
-      .trim()
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-    if (name) {
-      const blocks = findBlocks(lower.replace(createMatch[0], ''));
-      return { type: 'create-screen', name, blocks };
+    const surface = detectSurface(lower);
+    let name = createMatch[1]
+      .replace(/\b(new|a|an|the|whatsapp|chat|mobile|native|ios|android|app|web)\b/gi, '')
+      .trim();
+    if (!name) {
+      // "create a whatsapp flow for orders" — the name lives after "for".
+      const forMatch = lower.match(/\b(?:for|about)\s+([\w\s-]+?)\s*$/);
+      name = forMatch ? forMatch[1].trim() : '';
     }
+    if (!name) name = surface === 'chat' ? 'new flow' : 'new screen';
+    name = name.replace(/\b\w/g, (c) => c.toUpperCase());
+    const blocks = surface === 'chat' ? [] : findBlocks(lower.replace(createMatch[0], ''));
+    return { type: 'create-screen', name, blocks, surface };
   }
 
   if (/\b(remove|delete|drop)\b/.test(lower)) {
-    const screenRef = lower.match(/\b(?:remove|delete|drop)\s+(?:the\s+)?([\w\s-]+?)\s+(?:page|screen)\b/i);
+    const screenRef = lower.match(/\b(?:remove|delete|drop)\s+(?:the\s+)?([\w\s-]+?)\s+(?:page|screen|flow)\b/i);
     if (screenRef) return { type: 'remove-screen', screenName: screenRef[1].trim() };
     const blocks = findBlocks(lower);
     if (blocks.length > 0) {
@@ -202,10 +294,12 @@ export function parse(inputRaw: string): Intent {
 
 export const HELP_TEXT = [
   'Here is what you can ask me to do:',
-  '• Build — "create a pricing page with a hero and pricing table", "add a signup form to the home page", "remove the footer"',
-  '• Restyle — "change the primary color to forest green", "set the background to #F4F1EA", "make everything rounder", "sharper corners", "radius 12px"',
-  '• Typography & rhythm — "use a serif for headings", "switch body font to sans", "make the layout more compact", "more breathing room"',
-  '• Depth — "remove all shadows", "give cards a pronounced shadow"',
-  '• Maintain — "audit the product", "undo that"',
-  'Every change is recorded in the Changelog with a one-click revert.',
+  '• Brand — "this is a dental clinic called Brightside" (rewrites the whole product for that business), "rebrand to Alpine", "rewrite the copy"',
+  '• Build — "create a pricing page with a hero and pricing table", "create an app screen for booking", "create a whatsapp flow for support", "add a signup form to the home page"',
+  '• Content — "change the headline to Fresh bread daily", "change the quote to …"',
+  '• Restyle — "change the primary color to forest green", "make everything rounder", "radius 12px", "use a serif for headings", "more breathing room"',
+  '• Voice — "make the tone playful", "use emoji in chat", "make the voice professional"',
+  '• Ship — "export the code" (HTML, React Native, WhatsApp flow JSON)',
+  '• Maintain — "audit the product", "fix drift", "undo"',
+  'Every change lands in the Changelog with a one-click revert.',
 ].join('\n');

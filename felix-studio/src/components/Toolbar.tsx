@@ -6,6 +6,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Share,
 } from 'lucide-react';
 import { CanvasApi, Tool, Viewport } from './Canvas';
 import { useStudio } from '../engine/store';
@@ -15,11 +16,13 @@ export function Toolbar({
   setTool,
   viewport,
   api,
+  onExport,
 }: {
   tool: Tool;
   setTool: (t: Tool) => void;
   viewport: Viewport;
   api: () => CanvasApi | null;
+  onExport: () => void;
 }) {
   const { dispatch } = useStudio();
   const toolBtn = (active: boolean) =>
@@ -48,8 +51,8 @@ export function Toolbar({
         </button>
       </div>
 
-      <div className="hidden text-xs text-stone-400 md:block">
-        a conversational design system — talk to Felix to build and maintain the product
+      <div className="hidden text-xs text-stone-400 lg:block">
+        one product, three surfaces — talk to Felix to build and maintain it
       </div>
 
       <div className="flex items-center gap-0.5">
@@ -66,6 +69,13 @@ export function Toolbar({
           <Maximize2 size={15} />
         </button>
         <div className="mx-1.5 h-5 w-px bg-stone-200" />
+        <button
+          onClick={onExport}
+          className="flex items-center gap-1.5 rounded-md bg-stone-800 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-stone-700"
+        >
+          <Share size={12} />
+          Export
+        </button>
         <button
           onClick={() => {
             if (window.confirm('Reset the studio to its starting state? This clears all changes.')) {

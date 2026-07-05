@@ -7,9 +7,10 @@ import {
   useState,
 } from 'react';
 import { tokensToCssVars } from '../felix/tokens';
-import { BLOCK_LABELS, FRAME_WIDTH, useStudio } from '../engine/store';
+import { BLOCK_LABELS, FRAME_WIDTHS, SURFACE_LABELS, useStudio } from '../engine/store';
 import { Screen } from '../engine/types';
 import { BlockRenderer } from './blocks';
+import { ChatTranscript } from './ChatTranscript';
 
 export type Tool = 'select' | 'hand';
 
@@ -32,10 +33,75 @@ function clampScale(s: number) {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 }
 
+/** Phone status bar for native + chat frames. Inherits its text color. */
+function StatusBar({ inherit }: { inherit?: boolean }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '6px 16px 4px',
+        fontFamily: 'Inter, sans-serif',
+        fontSize: 11,
+        fontWeight: 600,
+        color: inherit ? 'inherit' : 'var(--felix-color-ink)',
+      }}
+    >
+      <span>9:41</span>
+      <span style={{ letterSpacing: 1 }}>▁▂▄ ⏻ ▮</span>
+    </div>
+  );
+}
+
+/** WhatsApp-style conversation header, branded from the tokens. */
+function ChatHeader({ brand }: { brand: string }) {
+  return (
+    <div
+      style={{
+        background: 'var(--felix-color-primary)',
+        color: 'var(--felix-color-on-primary)',
+      }}
+    >
+      <StatusBar inherit />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '6px 12px 10px',
+        }}
+      >
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 30,
+            height: 30,
+            borderRadius: '50%',
+            background: 'rgba(255,255,255,0.25)',
+            fontFamily: 'Inter, sans-serif',
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+        >
+          {brand.slice(0, 1).toUpperCase()}
+        </span>
+        <div style={{ fontFamily: 'Inter, sans-serif', lineHeight: 1.2 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>{brand}</div>
+          <div style={{ fontSize: 10, opacity: 0.8 }}>online · business account</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Frame({
   screen,
   selected,
   selectedBlockId,
+  selectedStepId,
   tool,
   scale,
   onMove,
@@ -43,15 +109,17 @@ function Frame({
   screen: Screen;
   selected: boolean;
   selectedBlockId: string | null;
+  selectedStepId: string | null;
   tool: Tool;
   scale: number;
   onMove: (x: number, y: number) => void;
 }) {
-  const { dispatch } = useStudio();
+  const { state, dispatch } = useStudio();
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const interactive = tool === 'select';
 
   const onLabelPointerDown = (e: React.PointerEvent) => {
-    if (tool !== 'select') return;
+    if (!interactive) return;
     e.stopPropagation();
     dispatch({ type: 'select', selection: { kind: 'screen', screenId: screen.id } });
     dragRef.current = { startX: e.clientX, startY: e.clientY, origX: screen.x, origY: screen.y };
@@ -66,14 +134,16 @@ function Frame({
     dragRef.current = null;
   };
 
+  const isPhone = screen.surface !== 'web';
+
   return (
-    <div style={{ position: 'absolute', left: screen.x, top: screen.y, width: FRAME_WIDTH }}>
+    <div style={{ position: 'absolute', left: screen.x, top: screen.y, width: FRAME_WIDTHS[screen.surface] }}>
       <div
         onPointerDown={onLabelPointerDown}
         onPointerMove={onLabelPointerMove}
         onPointerUp={onLabelPointerUp}
         className={
-          'mb-1.5 inline-flex cursor-grab select-none items-center gap-1 text-xs font-medium active:cursor-grabbing ' +
+          'mb-1.5 inline-flex cursor-grab select-none items-center gap-1.5 text-xs font-medium active:cursor-grabbing ' +
           (selected ? 'text-blue-600' : 'text-stone-500 hover:text-stone-700')
         }
         style={{
@@ -84,64 +154,87 @@ function Frame({
         title="Drag to move the frame"
       >
         {screen.name}
+        <span className={'rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ' + (selected ? 'bg-blue-100 text-blue-600' : 'bg-stone-200 text-stone-500')}>
+          {SURFACE_LABELS[screen.surface]}
+        </span>
       </div>
 
       <div
         onClick={(e) => {
-          if (tool !== 'select') return;
+          if (!interactive) return;
           e.stopPropagation();
           dispatch({ type: 'select', selection: { kind: 'screen', screenId: screen.id } });
         }}
-        className="overflow-hidden bg-white"
+        className="overflow-hidden"
         style={{
-          borderRadius: 6,
+          borderRadius: isPhone ? 24 : 6,
           boxShadow: selected
             ? `0 0 0 ${2 / scale}px #3B82F6, 0 8px 24px rgba(28,25,23,0.12)`
             : '0 0 0 1px rgba(28,25,23,0.08), 0 8px 24px rgba(28,25,23,0.10)',
           background: 'var(--felix-color-background)',
         }}
       >
-        {screen.blocks.length === 0 ? (
-          <div className="flex h-48 items-center justify-center text-sm text-stone-400">
-            Empty frame — ask Felix to add a section.
-          </div>
+        {screen.surface === 'chat' ? (
+          <>
+            <ChatHeader brand={state.business.name} />
+            <ChatTranscript
+              screen={screen}
+              selectedStepId={selectedStepId}
+              interactive={interactive}
+              scale={scale}
+            />
+          </>
         ) : (
-          screen.blocks.map((block) => {
-            const isSel = block.id === selectedBlockId;
-            return (
-              <div
-                key={block.id}
-                onClick={(e) => {
-                  if (tool !== 'select') return;
-                  e.stopPropagation();
-                  dispatch({
-                    type: 'select',
-                    selection: { kind: 'block', screenId: screen.id, blockId: block.id },
-                  });
-                }}
-                className="group relative"
-              >
-                <div style={{ pointerEvents: 'none' }}>
-                  <BlockRenderer block={block} />
-                </div>
-                <div
-                  className={
-                    'pointer-events-none absolute inset-0 transition-[box-shadow] ' +
-                    (isSel ? '' : 'group-hover:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.55)]')
-                  }
-                  style={isSel ? { boxShadow: `inset 0 0 0 ${2 / scale}px #3B82F6` } : undefined}
-                />
-                {isSel && (
-                  <div
-                    className="pointer-events-none absolute left-0 top-0 bg-blue-500 px-1.5 py-0.5 text-[10px] font-semibold text-white"
-                    style={{ transform: `scale(${Math.min(2.4, 1 / scale)})`, transformOrigin: 'left top' }}
-                  >
-                    {BLOCK_LABELS[block.kind]}
-                  </div>
-                )}
+          <>
+            {screen.surface === 'native' && <StatusBar />}
+            {screen.blocks.length === 0 ? (
+              <div className="flex h-48 items-center justify-center text-sm text-stone-400">
+                Empty frame — ask Felix to add a section.
               </div>
-            );
-          })
+            ) : (
+              screen.blocks.map((block) => {
+                const isSel = block.id === selectedBlockId;
+                return (
+                  <div
+                    key={block.id}
+                    onClick={(e) => {
+                      if (!interactive) return;
+                      e.stopPropagation();
+                      dispatch({
+                        type: 'select',
+                        selection: { kind: 'block', screenId: screen.id, blockId: block.id },
+                      });
+                    }}
+                    className="group relative"
+                  >
+                    <div style={{ pointerEvents: 'none' }}>
+                      <BlockRenderer block={block} surface={screen.surface} />
+                    </div>
+                    <div
+                      className={
+                        'pointer-events-none absolute inset-0 transition-[box-shadow] ' +
+                        (isSel ? '' : 'group-hover:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.55)]')
+                      }
+                      style={isSel ? { boxShadow: `inset 0 0 0 ${2 / scale}px #3B82F6` } : undefined}
+                    />
+                    {isSel && (
+                      <div
+                        className="pointer-events-none absolute left-0 top-0 bg-blue-500 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                        style={{ transform: `scale(${Math.min(2.4, 1 / scale)})`, transformOrigin: 'left top' }}
+                      >
+                        {BLOCK_LABELS[block.kind]}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+            {screen.surface === 'native' && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0 8px', background: 'var(--felix-color-surface)' }}>
+                <div style={{ width: 110, height: 4, borderRadius: 2, background: 'var(--felix-color-border)' }} />
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -190,9 +283,9 @@ export function Canvas({
     if (!rect || state.screens.length === 0) return;
     const PAD = 80;
     const minX = Math.min(...state.screens.map((s) => s.x)) - PAD;
-    const maxX = Math.max(...state.screens.map((s) => s.x + FRAME_WIDTH)) + PAD;
+    const maxX = Math.max(...state.screens.map((s) => s.x + FRAME_WIDTHS[s.surface])) + PAD;
     const minY = Math.min(...state.screens.map((s) => s.y)) - PAD;
-    // Frame heights are content-driven; assume a tall page for fitting width-first.
+    // Frame heights are content-driven; fit width-first.
     const scale = clampScale(Math.min(rect.width / (maxX - minX), 1));
     setViewport({ scale, x: -minX * scale + (rect.width - (maxX - minX) * scale) / 2, y: -minY * scale + 24 });
   }, [state.screens, setViewport]);
@@ -313,10 +406,15 @@ export function Canvas({
             screen={s}
             tool={panning ? 'hand' : tool}
             scale={viewport.scale}
-            selected={state.selection.kind !== 'none' && state.selection.screenId === s.id && state.selection.kind === 'screen'}
+            selected={state.selection.kind === 'screen' && state.selection.screenId === s.id}
             selectedBlockId={
               state.selection.kind === 'block' && state.selection.screenId === s.id
                 ? state.selection.blockId
+                : null
+            }
+            selectedStepId={
+              state.selection.kind === 'step' && state.selection.screenId === s.id
+                ? state.selection.stepId
                 : null
             }
             onMove={(x, y) => dispatch({ type: 'move-screen', screenId: s.id, x, y })}

@@ -1,9 +1,9 @@
 # Felix Studio
 
 A working prototype of a **conversational design system**: a Figma-style studio
-where product designers build and maintain a digital product by talking to the
-design system itself, instead of hand-assembling screens from a static
-component library.
+where product designers build and maintain a digital product — for **any
+business**, across **multiple surfaces** (web, native app, WhatsApp) — by
+talking to the design system itself.
 
 ```bash
 cd felix-studio
@@ -15,59 +15,69 @@ npm run dev
 
 A traditional design system is a reference — tokens, components, and docs that a
 designer reads and then applies by hand. Felix Studio inverts that: the design
-system is the **interlocutor**. You describe intent ("create a pricing page",
-"make everything rounder", "audit the product") and the system executes it,
+system is the **interlocutor**. You describe intent and the system executes it,
 because it — not the designer's memory — holds the constraints.
 
-Three principles drive the implementation:
+Four principles drive the implementation:
 
-1. **Tokens are the single source of truth.** Every primitive and every screen
-   reads token values through CSS custom properties (`src/felix/tokens.ts`).
-   A one-sentence request restyles the entire product because nothing on the
-   canvas owns its own styling.
-2. **The conversation is the contribution process.** Every change — spoken or
-   made directly in the token editor — lands in a changelog with a snapshot and
-   one-click revert. The product's history is legible and reversible.
-3. **Maintenance is a dialogue, not a chore.** The audit (`src/engine/audit.ts`)
-   continuously checks for token drift (values that bypass the system), WCAG
-   contrast failures, and structural gaps — and the fix is also conversational
-   ("fix drift").
+1. **Tokens are the single source of truth.** Color, type, spacing, radius,
+   shadow — *and voice* (tone, emoji), because conversational surfaces are
+   styled by words the way visual surfaces are styled by color. Every surface
+   derives from one `TokenSet` (`src/felix/tokens.ts`).
+2. **Content is data, not code.** Every visible string lives in block props,
+   written by the copywriter (`src/engine/copywriter.ts`) from a business
+   profile. Say *"this is a dental clinic called Brightside"* and every
+   headline, pricing tier, form and chat flow rewrites itself across all
+   surfaces — structure and tokens stay put.
+3. **The conversation is the contribution process.** Every change — spoken,
+   or made directly in the inspectors — lands in a changelog with a snapshot
+   and one-click revert.
+4. **Maintenance is a dialogue.** The audit (`src/engine/audit.ts`) is
+   surface-aware: token drift and WCAG contrast on visual surfaces; dead-end
+   replies, missing human handoffs and over-long messages in chat flows.
 
-## What you can say
+## The LLM seam
 
-| Build | Restyle | Maintain |
-| --- | --- | --- |
-| "create a pricing page with a hero and pricing table" | "change the primary color to forest green" | "audit the product" |
-| "add a signup form to the home page" | "set the background to #F4F1EA" | "fix drift" |
-| "remove the footer" | "make everything rounder" / "radius 12px" | "undo" |
-| "delete the dashboard page" | "more breathing room" / "make it compact" | revert any changelog entry |
-|  | "use a serif for headings", "remove all shadows" |  |
+The demo is fully deterministic and offline — no API key. Two contracts mark
+exactly where a real LLM slots in without touching anything downstream:
 
-The parser (`src/engine/parser.ts`) is deterministic and offline so the demo
-needs no API key. In a production system an LLM grounded in the design system
-would sit behind the same `Intent` contract.
+- **`parse(input): Intent`** (`src/engine/parser.ts`) — language → typed intent.
+- **`generateBlockProps` / `generateFlowSteps`** (`src/engine/copywriter.ts`) —
+  business profile + voice → content. The demo ships archetypes for
+  food, health, fitness, hospitality, retail, agencies and a SaaS fallback.
+
+## Surfaces
+
+Each frame on the canvas belongs to a surface, with its own rendering, audit
+rules and **export format**:
+
+| Surface | Frame | Blocks | Exports as |
+| --- | --- | --- | --- |
+| Web | Browser-width page | Responsive 3–4 col grids | Standalone HTML, tokens as `:root` CSS variables |
+| App | Phone chrome (status bar, tab bar) | Same blocks, adapted: stacked grids, tables become cards, footer becomes a tab bar | React Native component with a `tokens` object |
+| WhatsApp | Branded chat transcript | Flow steps: bot message + quick replies wired to other steps | Flow-definition JSON (steps, messages, quick replies, voice) |
+
+Try: *"create an app screen for booking"*, *"create a whatsapp flow for
+orders"*, then **Export** in the toolbar.
 
 ## The editor
 
-The studio is laid out like Figma:
+- **Infinite canvas.** Scroll to pan, `⌘/Ctrl + scroll` to zoom, `Space`/hand
+  tool to drag-pan, `Shift+1` to fit. Drag a frame's name label to move it.
+- **Selection.** Click frames, sections, or chat bubbles (or use Layers,
+  grouped by surface). `Esc` deselects, `Delete` removes, `⌘Z` undoes.
+- **Right sidebar.** Context-sensitive: business profile + tokens + voice when
+  nothing is selected; frame props for frames; content editors for sections
+  (headline, quote, buttons…); message + quick-reply wiring for chat steps.
+  Changelog and Audit tabs alongside.
+- **Chat dock.** Felix floats over the canvas. Conversation and direct
+  manipulation write to the same store, so both land in the changelog.
 
-- **Infinite canvas.** Every screen is a frame, all visible at once. Scroll to
-  pan, `⌘/Ctrl + scroll` to zoom, `Space` or the hand tool (`H`) to drag-pan,
-  `Shift+1` / toolbar to zoom-to-fit. Drag a frame's name label to move it.
-- **Selection.** Click a frame or any section inside it (or use the Layers
-  panel). `Esc` deselects, `Delete` removes the selection, `⌘Z` undoes.
-- **Left sidebar.** *Layers* (frames and their sections, with drift warnings)
-  and *Assets* (the Felix primitives rendered live from current tokens).
-- **Right sidebar.** *Design* is context-sensitive — global tokens when nothing
-  is selected, frame properties (rename, delete) for a selected frame, section
-  properties (reorder, fix drift, delete) for a selected section — plus
-  *Changelog* (with per-entry revert) and *Audit* (live health report).
-- **Chat dock.** Felix floats over the canvas, Figma-AI style. Conversation and
-  direct manipulation write to the same store, so both land in the changelog.
-
-State persists to `localStorage`; "Reset demo" starts over. The Dashboard
-frame ships with one deliberately drifted block so the audit has something
-real to find.
+State persists to `localStorage`; "Reset demo" starts over. The Dashboard frame
+ships with one deliberately drifted block so the audit has something real to
+find. Real persistence/collaboration is the next layer: the changelog is
+already shaped like a commit log — it wants a backend, which this prototype
+deliberately stops short of.
 
 ## A note on sources
 

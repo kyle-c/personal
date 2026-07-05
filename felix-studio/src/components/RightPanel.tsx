@@ -1,17 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
   History,
   Palette,
+  Plus,
   RotateCcw,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Wand2,
+  X,
 } from 'lucide-react';
 import { TokenSet } from '../felix/tokens';
 import { runAudit } from '../engine/audit';
-import { BLOCK_LABELS, useStudio } from '../engine/store';
+import { BLOCK_LABELS, SURFACE_LABELS, useStudio } from '../engine/store';
+import { Block, BlockProps } from '../engine/types';
 
 type Tab = 'design' | 'changelog' | 'audit';
 
@@ -20,6 +24,45 @@ function SectionLabel({ children }: { children: string }) {
     <div className="mb-2 mt-5 text-[11px] font-semibold uppercase tracking-wider text-stone-400 first:mt-0">
       {children}
     </div>
+  );
+}
+
+/** Text input that keeps local state and commits on blur / Enter. */
+function TextField({
+  label,
+  value,
+  multiline,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  multiline?: boolean;
+  onCommit: (v: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (draft !== value) onCommit(draft);
+  };
+  const cls =
+    'w-full rounded-md border border-stone-300 px-2 py-1.5 text-[13px] text-stone-800 focus:border-blue-500 focus:outline-none';
+  return (
+    <label className="block py-1">
+      <span className="mb-1 block text-[11px] text-stone-400">{label}</span>
+      {multiline ? (
+        <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} rows={3} className={cls + ' resize-none'} />
+      ) : (
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+          className={cls}
+        />
+      )}
+    </label>
   );
 }
 
@@ -49,7 +92,35 @@ function ColorRow({
   );
 }
 
-/** Token editors — shown when nothing on the canvas is selected. */
+function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly T[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex gap-1">
+      {options.map((o) => (
+        <button
+          key={o}
+          onClick={() => onChange(o)}
+          className={
+            value === o
+              ? 'rounded-md bg-stone-800 px-1.5 py-1 text-[10px] font-medium text-white'
+              : 'rounded-md border border-stone-200 px-1.5 py-1 text-[10px] text-stone-500 hover:border-stone-400'
+          }
+        >
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Brand, tokens and voice — shown when nothing on the canvas is selected. */
 function TokensPane() {
   const { state, dispatch } = useStudio();
   const t = state.tokens;
@@ -63,9 +134,32 @@ function TokensPane() {
   return (
     <div className="px-3 py-3">
       <p className="mb-1 text-[11px] leading-relaxed text-stone-400">
-        Nothing selected — these are the product-wide tokens, the single source of
-        truth. Edit here or just ask Felix.
+        Nothing selected — this is the product itself: who it’s for, and the tokens
+        every surface reads from. Edit here or just ask Felix.
       </p>
+
+      <SectionLabel>Brand</SectionLabel>
+      <TextField
+        label="Business name"
+        value={state.business.name}
+        onCommit={(v) =>
+          v.trim() && dispatch({ type: 'set-business-direct', business: { ...state.business, name: v.trim() }, regenerate: true })
+        }
+      />
+      <TextField
+        label="Industry / what it is"
+        value={state.business.industry}
+        onCommit={(v) =>
+          v.trim() && dispatch({ type: 'set-business-direct', business: { ...state.business, industry: v.trim() }, regenerate: true })
+        }
+      />
+      <button
+        onClick={() => dispatch({ type: 'converse', input: 'rewrite the copy' })}
+        className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-md border border-stone-200 px-2 py-1.5 text-xs text-stone-600 transition-colors hover:border-stone-400"
+      >
+        <Sparkles size={12} />
+        Regenerate all copy
+      </button>
 
       <SectionLabel>Color</SectionLabel>
       <ColorRow label="Primary" value={t.color.primary} onChange={(v) => update('Changed primary color', (d) => { d.color.primary = v; })} />
@@ -93,41 +187,42 @@ function TokensPane() {
       <SectionLabel>Rhythm</SectionLabel>
       <div className="flex items-center justify-between py-1">
         <span className="text-[13px] text-stone-700">Density</span>
-        <div className="flex gap-1">
-          {(['compact', 'comfortable', 'spacious'] as const).map((d) => (
-            <button
-              key={d}
-              onClick={() => update(`Set spacing density to ${d}`, (dr) => { dr.space.density = d; })}
-              className={
-                t.space.density === d
-                  ? 'rounded-md bg-stone-800 px-1.5 py-1 text-[10px] font-medium text-white'
-                  : 'rounded-md border border-stone-200 px-1.5 py-1 text-[10px] text-stone-500 hover:border-stone-400'
-              }
-            >
-              {d}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          options={['compact', 'comfortable', 'spacious'] as const}
+          value={t.space.density}
+          onChange={(d) => update(`Set spacing density to ${d}`, (dr) => { dr.space.density = d; })}
+        />
       </div>
 
       <SectionLabel>Depth</SectionLabel>
       <div className="flex items-center justify-between py-1">
         <span className="text-[13px] text-stone-700">Shadows</span>
-        <div className="flex gap-1">
-          {(['none', 'soft', 'pronounced'] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => update(`Set shadows to ${s}`, (d) => { d.shadow.level = s; })}
-              className={
-                t.shadow.level === s
-                  ? 'rounded-md bg-stone-800 px-1.5 py-1 text-[10px] font-medium text-white'
-                  : 'rounded-md border border-stone-200 px-1.5 py-1 text-[10px] text-stone-500 hover:border-stone-400'
-              }
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          options={['none', 'soft', 'pronounced'] as const}
+          value={t.shadow.level}
+          onChange={(s) => update(`Set shadows to ${s}`, (d) => { d.shadow.level = s; })}
+        />
+      </div>
+
+      <SectionLabel>Voice</SectionLabel>
+      <p className="mb-1 text-[11px] leading-relaxed text-stone-400">
+        The verbal identity — chat flows are written in this voice.
+      </p>
+      <div className="flex items-center justify-between py-1">
+        <span className="text-[13px] text-stone-700">Tone</span>
+        <Segmented
+          options={['warm', 'professional', 'playful'] as const}
+          value={t.voice.tone}
+          onChange={(tone) => dispatch({ type: 'converse', input: `make the tone ${tone}` })}
+        />
+      </div>
+      <div className="flex items-center justify-between py-1">
+        <span className="text-[13px] text-stone-700">Emoji</span>
+        <Segmented
+          options={['on', 'off'] as const}
+          value={t.voice.emoji ? 'on' : 'off'}
+          onChange={(v) => dispatch({ type: 'converse', input: v === 'on' ? 'use emoji in chat' : 'no emoji in chat' })}
+        />
       </div>
 
       <SectionLabel>Typography</SectionLabel>
@@ -156,38 +251,37 @@ function TokensPane() {
 function ScreenPane({ screenId }: { screenId: string }) {
   const { state, dispatch } = useStudio();
   const screen = state.screens.find((s) => s.id === screenId);
-  const [name, setName] = useState(screen?.name ?? '');
   if (!screen) return null;
   return (
     <div className="px-3 py-3">
       <SectionLabel>Frame</SectionLabel>
-      <label className="block">
-        <span className="mb-1 block text-[11px] text-stone-400">Name</span>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => dispatch({ type: 'rename-screen', screenId, name })}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-          }}
-          className="w-full rounded-md border border-stone-300 px-2 py-1.5 text-[13px] text-stone-800 focus:border-blue-500 focus:outline-none"
-        />
-      </label>
+      <TextField
+        label="Name"
+        value={screen.name}
+        onCommit={(v) => dispatch({ type: 'rename-screen', screenId, name: v })}
+      />
       <div className="mt-2 flex items-center justify-between text-[11px] text-stone-400">
-        <span>Position</span>
-        <span className="font-mono">
-          {Math.round(screen.x)}, {Math.round(screen.y)}
-        </span>
+        <span>Surface</span>
+        <span className="font-medium text-stone-600">{SURFACE_LABELS[screen.surface]}</span>
       </div>
       <div className="mt-1 flex items-center justify-between text-[11px] text-stone-400">
-        <span>Sections</span>
-        <span className="font-mono">{screen.blocks.length}</span>
+        <span>{screen.surface === 'chat' ? 'Steps' : 'Sections'}</span>
+        <span className="font-mono">{screen.surface === 'chat' ? screen.steps.length : screen.blocks.length}</span>
       </div>
 
       <SectionLabel>Actions</SectionLabel>
+      {screen.surface === 'chat' && (
+        <button
+          onClick={() => dispatch({ type: 'add-step', screenId })}
+          className="mb-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border border-stone-200 px-2 py-1.5 text-xs text-stone-600 transition-colors hover:border-stone-400"
+        >
+          <Plus size={12} />
+          Add step
+        </button>
+      )}
       <button
         onClick={() =>
-          dispatch({ type: 'converse', input: `delete the ${screen.name.toLowerCase()} page` })
+          dispatch({ type: 'converse', input: `delete the ${screen.name.toLowerCase()} ${screen.surface === 'chat' ? 'flow' : 'page'}` })
         }
         className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 transition-colors hover:bg-red-50"
       >
@@ -195,13 +289,47 @@ function ScreenPane({ screenId }: { screenId: string }) {
         Delete frame
       </button>
       <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
-        Add sections conversationally — “add a testimonial to the{' '}
-        {screen.name.toLowerCase()} page”. Drag the frame’s name label to move it on
-        the canvas.
+        {screen.surface === 'chat'
+          ? 'Click a bubble on the canvas to edit its message and replies.'
+          : `Add sections conversationally — “add a testimonial to the ${screen.name.toLowerCase()} page”.`}{' '}
+        Drag the frame’s name label to move it on the canvas.
       </p>
     </div>
   );
 }
+
+/** Which props are directly editable per block kind. */
+const EDITABLE_PROPS: Partial<
+  Record<Block['kind'], { key: keyof BlockProps; label: string; multiline?: boolean }[]>
+> = {
+  navbar: [
+    { key: 'brand', label: 'Brand' },
+    { key: 'ctaLabel', label: 'Button' },
+  ],
+  hero: [
+    { key: 'badge', label: 'Badge' },
+    { key: 'headline', label: 'Headline' },
+    { key: 'subhead', label: 'Subhead', multiline: true },
+    { key: 'primaryCta', label: 'Primary button' },
+    { key: 'secondaryCta', label: 'Secondary button' },
+  ],
+  cta: [
+    { key: 'headline', label: 'Headline' },
+    { key: 'subhead', label: 'Subhead' },
+    { key: 'primaryCta', label: 'Button' },
+  ],
+  testimonial: [
+    { key: 'quote', label: 'Quote', multiline: true },
+    { key: 'author', label: 'Author' },
+    { key: 'role', label: 'Role' },
+  ],
+  form: [
+    { key: 'title', label: 'Title' },
+    { key: 'submitLabel', label: 'Submit button' },
+    { key: 'footnote', label: 'Footnote' },
+  ],
+  footer: [{ key: 'fineprint', label: 'Fine print' }],
+};
 
 /** Block properties — shown when a section inside a frame is selected. */
 function BlockPane({ screenId, blockId }: { screenId: string; blockId: string }) {
@@ -210,6 +338,17 @@ function BlockPane({ screenId, blockId }: { screenId: string; blockId: string })
   const block = screen?.blocks.find((b) => b.id === blockId);
   if (!screen || !block) return null;
   const idx = screen.blocks.indexOf(block);
+  const editable = EDITABLE_PROPS[block.kind];
+
+  const commitProp = (key: keyof BlockProps, label: string) => (v: string) =>
+    dispatch({
+      type: 'set-block-props',
+      screenId,
+      blockId,
+      props: { ...block.props, [key]: v },
+      summary: `Edited ${label.toLowerCase()} on “${screen.name}”`,
+    });
+
   return (
     <div className="px-3 py-3">
       <SectionLabel>Section</SectionLabel>
@@ -221,6 +360,31 @@ function BlockPane({ screenId, blockId }: { screenId: string; blockId: string })
         <span className="text-stone-700">Frame</span>
         <span className="text-stone-500">{screen.name}</span>
       </div>
+
+      {editable && (
+        <>
+          <SectionLabel>Content</SectionLabel>
+          {editable.map(({ key, label, multiline }) => (
+            <TextField
+              key={key}
+              label={label}
+              multiline={multiline}
+              value={(block.props[key] as string) ?? ''}
+              onCommit={commitProp(key, label)}
+            />
+          ))}
+        </>
+      )}
+      {!editable && (
+        <>
+          <SectionLabel>Content</SectionLabel>
+          <p className="text-[11px] leading-relaxed text-stone-400">
+            This section is list content ({BLOCK_LABELS[block.kind]}). Ask Felix to
+            rewrite it — “rewrite the copy on the {screen.name.toLowerCase()} page” —
+            or rebrand the whole product to regenerate everything.
+          </p>
+        </>
+      )}
 
       <SectionLabel>Arrange</SectionLabel>
       <div className="flex gap-1.5">
@@ -271,6 +435,99 @@ function BlockPane({ screenId, blockId }: { screenId: string; blockId: string })
   );
 }
 
+/** Chat step properties — message, quick replies and their wiring. */
+function StepPane({ screenId, stepId }: { screenId: string; stepId: string }) {
+  const { state, dispatch } = useStudio();
+  const screen = state.screens.find((s) => s.id === screenId);
+  const step = screen?.steps.find((s) => s.id === stepId);
+  if (!screen || !step) return null;
+
+  const edit = (patch: Partial<typeof step>, summary: string) =>
+    dispatch({ type: 'edit-step', screenId, stepId, patch, summary });
+
+  const setReply = (i: number, label?: string, goTo?: string) => {
+    const replies = step.replies.map((r, j) =>
+      j === i ? { label: label ?? r.label, goTo: goTo === '' ? undefined : goTo ?? r.goTo } : r,
+    );
+    edit({ replies }, `Rewired reply on “${step.name}”`);
+  };
+
+  return (
+    <div className="px-3 py-3">
+      <SectionLabel>Step</SectionLabel>
+      <TextField label="Name" value={step.name} onCommit={(v) => edit({ name: v }, `Renamed step to “${v}”`)} />
+      <TextField
+        label="Bot message"
+        multiline
+        value={step.message}
+        onCommit={(v) => edit({ message: v }, `Edited message on “${step.name}”`)}
+      />
+
+      <SectionLabel>Quick Replies</SectionLabel>
+      <div className="space-y-2">
+        {step.replies.map((r, i) => (
+          <div key={i} className="rounded-md border border-stone-200 p-2">
+            <div className="flex items-center gap-1.5">
+              <input
+                defaultValue={r.label}
+                onBlur={(e) => e.target.value !== r.label && setReply(i, e.target.value)}
+                className="min-w-0 flex-1 rounded border border-stone-300 px-1.5 py-1 text-xs text-stone-800 focus:border-blue-500 focus:outline-none"
+              />
+              <button
+                onClick={() =>
+                  edit(
+                    { replies: step.replies.filter((_, j) => j !== i) },
+                    `Removed reply from “${step.name}”`,
+                  )
+                }
+                className="rounded p-1 text-stone-400 hover:text-red-600"
+                aria-label="Remove reply"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <select
+              value={r.goTo ?? ''}
+              onChange={(e) => setReply(i, undefined, e.target.value)}
+              className="mt-1.5 w-full rounded border border-stone-300 bg-white px-1.5 py-1 text-xs text-stone-600 focus:border-blue-500 focus:outline-none"
+            >
+              <option value="">→ (ends conversation)</option>
+              {screen.steps
+                .filter((s) => s.id !== step.id)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    → {s.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={() =>
+          edit(
+            { replies: [...step.replies, { label: 'New reply', goTo: screen.steps[0]?.id }] },
+            `Added reply to “${step.name}”`,
+          )
+        }
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-stone-200 px-2 py-1.5 text-xs text-stone-600 transition-colors hover:border-stone-400"
+      >
+        <Plus size={12} />
+        Add reply
+      </button>
+
+      <SectionLabel>Actions</SectionLabel>
+      <button
+        onClick={() => dispatch({ type: 'delete-step', screenId, stepId })}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 transition-colors hover:bg-red-50"
+      >
+        <Trash2 size={12} />
+        Delete step
+      </button>
+    </div>
+  );
+}
+
 function ChangelogTab() {
   const { state, dispatch } = useStudio();
   if (state.changelog.length === 0) {
@@ -284,8 +541,8 @@ function ChangelogTab() {
   return (
     <div className="px-3 py-3">
       <p className="mb-3 text-[11px] leading-relaxed text-stone-400">
-        The product’s memory. Reverting restores tokens and frames to the moment
-        before that change.
+        The product’s memory. Reverting restores tokens, frames and the business
+        profile to the moment before that change.
       </p>
       <ol className="space-y-2">
         {state.changelog.map((e) => (
@@ -322,8 +579,9 @@ function AuditTab() {
   return (
     <div className="px-3 py-3">
       <p className="mb-3 text-[11px] leading-relaxed text-stone-400">
-        A live health check: token drift, WCAG contrast, and structural gaps — the
-        same report Felix gives when you say “audit the product”.
+        A live health check across every surface: token drift, WCAG contrast, dead-end
+        chat replies, missing handoffs — the same report Felix gives when you say
+        “audit the product”.
       </p>
       <div className="mb-3 flex gap-2">
         <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-800">
@@ -395,6 +653,8 @@ export function RightPanel() {
         {tab === 'design' &&
           (sel.kind === 'block' ? (
             <BlockPane key={sel.blockId} screenId={sel.screenId} blockId={sel.blockId} />
+          ) : sel.kind === 'step' ? (
+            <StepPane key={sel.stepId} screenId={sel.screenId} stepId={sel.stepId} />
           ) : sel.kind === 'screen' ? (
             <ScreenPane key={sel.screenId} screenId={sel.screenId} />
           ) : (

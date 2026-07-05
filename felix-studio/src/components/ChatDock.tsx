@@ -12,9 +12,11 @@ import { useStudio } from '../engine/store';
 import { AuditFinding } from '../engine/types';
 
 const SUGGESTIONS = [
-  'Create a pricing page with a hero and pricing table',
+  'This is a dental clinic called Brightside',
+  'Create a whatsapp flow for orders',
+  'Create an app screen for booking',
   'Change the primary color to forest green',
-  'Make everything rounder',
+  'Make the tone playful',
   'Audit the product',
 ];
 

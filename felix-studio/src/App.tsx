@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Canvas, CanvasApi, Tool, Viewport } from './components/Canvas';
 import { ChatDock } from './components/ChatDock';
+import { ExportDialog } from './components/ExportDialog';
 import { LeftPanel } from './components/LeftPanel';
 import { RightPanel } from './components/RightPanel';
 import { Toolbar } from './components/Toolbar';
@@ -10,6 +11,7 @@ function Shell() {
   const { state, dispatch } = useStudio();
   const [tool, setTool] = useState<Tool>('select');
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 0.5 });
+  const [exportOpen, setExportOpen] = useState(false);
   const canvasApi = useRef<CanvasApi | null>(null);
 
   // Global keyboard shortcuts (skipped while typing in a field).
@@ -32,10 +34,15 @@ function Shell() {
         const sel = state.selection;
         if (sel.kind === 'block') {
           dispatch({ type: 'delete-block', screenId: sel.screenId, blockId: sel.blockId });
+        } else if (sel.kind === 'step') {
+          dispatch({ type: 'delete-step', screenId: sel.screenId, stepId: sel.stepId });
         } else if (sel.kind === 'screen') {
           const screen = state.screens.find((s) => s.id === sel.screenId);
           if (screen && state.screens.length > 1) {
-            dispatch({ type: 'converse', input: `delete the ${screen.name.toLowerCase()} page` });
+            dispatch({
+              type: 'converse',
+              input: `delete the ${screen.name.toLowerCase()} ${screen.surface === 'chat' ? 'flow' : 'page'}`,
+            });
           }
         }
       }
@@ -46,12 +53,19 @@ function Shell() {
 
   return (
     <div className="flex h-screen flex-col bg-white text-stone-800">
-      <Toolbar tool={tool} setTool={setTool} viewport={viewport} api={() => canvasApi.current} />
+      <Toolbar
+        tool={tool}
+        setTool={setTool}
+        viewport={viewport}
+        api={() => canvasApi.current}
+        onExport={() => setExportOpen(true)}
+      />
       <div className="flex min-h-0 flex-1">
         <LeftPanel />
         <main className="relative min-w-0 flex-1">
           <Canvas tool={tool} viewport={viewport} setViewport={setViewport} apiRef={canvasApi} />
           <ChatDock />
+          {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
         </main>
         <RightPanel />
       </div>
