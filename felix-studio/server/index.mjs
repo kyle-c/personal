@@ -12,10 +12,12 @@
  * This is deliberately the simplest thing that makes the studio multiplayer.
  * The upgrade path is CRDTs (Yjs) behind the same message shapes.
  */
+import { createServer } from 'node:http';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { brainEnabled, brainModel, think } from './brain.mjs';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), 'data');
@@ -77,7 +79,40 @@ function broadcast(room, message, except) {
   }
 }
 
-const wss = new WebSocketServer({ port: PORT });
+// HTTP server: hosts the LLM brain endpoint; the sync WebSocket upgrades on it.
+const httpServer = createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204).end();
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/felix') {
+    if (!brainEnabled()) {
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'no_api_key' }));
+      return;
+    }
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body);
+        const result = await think(payload);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        console.error('[felix-brain] request failed:', err.message);
+        res.writeHead(502, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'brain_error' }));
+      }
+    });
+    return;
+  }
+  res.writeHead(404).end();
+});
+
+const wss = new WebSocketServer({ server: httpServer });
 
 wss.on('connection', (ws) => {
   let room = null;
@@ -134,6 +169,13 @@ wss.on('connection', (ws) => {
   });
 });
 
-const saved = readdirSync(DATA_DIR).filter((f) => f.endsWith('.json'));
-console.log(`[felix-sync] listening on ws://localhost:${PORT}`);
-console.log(`[felix-sync] data dir: ${DATA_DIR}${saved.length ? ` (${saved.length} saved room${saved.length === 1 ? '' : 's'})` : ''}`);
+httpServer.listen(PORT, () => {
+  const saved = readdirSync(DATA_DIR).filter((f) => f.endsWith('.json'));
+  console.log(`[felix-sync] listening on ws://localhost:${PORT}`);
+  console.log(`[felix-sync] data dir: ${DATA_DIR}${saved.length ? ` (${saved.length} saved room${saved.length === 1 ? '' : 's'})` : ''}`);
+  console.log(
+    brainEnabled()
+      ? `[felix-brain] LLM conversation ON (${brainModel()})`
+      : '[felix-brain] LLM conversation OFF — set ANTHROPIC_API_KEY to enable; the deterministic parser handles conversation meanwhile',
+  );
+});

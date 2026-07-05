@@ -5,7 +5,7 @@
  * would sit; the contract (Intent) would stay the same.
  */
 import { NAMED_COLORS } from '../felix/tokens';
-import { BlockKind, SurfaceType } from './types';
+import { BlockKind, BlockProps, SurfaceType } from './types';
 
 export type ContentProp =
   | 'headline'
@@ -22,8 +22,10 @@ export type Intent =
   | { type: 'remove-block'; block: BlockKind; screenName?: string }
   | { type: 'remove-screen'; screenName: string }
   | { type: 'set-business'; name?: string; industry?: string }
-  | { type: 'rewrite-copy'; screenName?: string }
+  | { type: 'rewrite-copy'; screenName?: string; force?: boolean }
   | { type: 'set-prop'; prop: ContentProp; value: string; screenName?: string }
+  /** LLM-authored content for one block — produced by the brain, not the regex parser. */
+  | { type: 'set-props'; block: BlockKind; props: BlockProps; screenName?: string }
   | { type: 'set-voice'; tone?: 'warm' | 'professional' | 'playful'; emoji?: boolean }
   | { type: 'set-color'; slot: 'primary' | 'background' | 'ink'; value: string }
   | { type: 'set-radius'; direction: 'rounder' | 'sharper' | 'set'; value?: number }
@@ -149,9 +151,11 @@ export function parse(inputRaw: string): Intent {
     return { type: 'set-business', industry, name };
   }
 
-  // "rewrite the copy", "regenerate the content on the home page"
-  if (/\b(rewrite|regenerate|refresh|redo)\b.*\b(copy|content|text|words)\b/.test(lower)) {
-    return { type: 'rewrite-copy', screenName: findScreenRef(lower) };
+  // "rewrite the copy", "regenerate the content on the home page".
+  // "…including my edits" / "…everything" overwrites hand-edited content too.
+  if (/\b(rewrite|regenerate|refresh|redo)\b.*\b(copy|content|text|words|everything)\b/.test(lower)) {
+    const force = /\b(everything|including (my|the|hand) ?edits|overwrite|even my edits)\b/.test(lower);
+    return { type: 'rewrite-copy', screenName: findScreenRef(lower), force };
   }
 
   // --- Content edits: change the headline to "..." --------------------------

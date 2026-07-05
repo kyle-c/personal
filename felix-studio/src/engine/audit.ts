@@ -6,10 +6,31 @@
  * decay in their own way.
  */
 import { contrastRatio, TokenSet, bestTextOn } from '../felix/tokens';
-import { AuditFinding, Screen } from './types';
+import { exportHash } from './hash';
+import { AuditFinding, Business, Screen, StudioState } from './types';
 
-export function runAudit(tokens: TokenSet, screens: Screen[]): AuditFinding[] {
+export function runAudit(
+  tokens: TokenSet,
+  screens: Screen[],
+  shipped?: { business: Business; exports: StudioState['exports'] },
+): AuditFinding[] {
   const findings: AuditFinding[] = [];
+
+  // 0. Shipped artifacts: exports that no longer match the product. This is
+  //    the maintenance loop reaching past the studio's edge — if tokens or
+  //    content changed since a screen was exported, the artifact is stale.
+  if (shipped) {
+    for (const screen of screens) {
+      const record = shipped.exports[screen.id];
+      if (record && record.hash !== exportHash(screen, tokens, shipped.business)) {
+        findings.push({
+          severity: 'warning',
+          title: `Export of “${screen.name}” is stale`,
+          detail: `The ${record.summary} you exported no longer matches the product — tokens or content changed since. Re-export it to keep what shipped in sync.`,
+        });
+      }
+    }
+  }
 
   // 1. Drift: blocks styled outside the token system (any visual surface).
   for (const screen of screens) {

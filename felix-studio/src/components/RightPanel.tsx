@@ -360,6 +360,18 @@ function BlockPane({ screenId, blockId }: { screenId: string; blockId: string })
         <span className="text-stone-700">Frame</span>
         <span className="text-stone-500">{screen.name}</span>
       </div>
+      {block.custom && (
+        <div className="mt-1.5 flex items-center justify-between gap-2 rounded-md bg-blue-50 px-2 py-1.5">
+          <span className="text-[11px] font-medium text-blue-800">✎ Hand-edited — rebrands preserve this</span>
+          <button
+            onClick={() => dispatch({ type: 'clear-custom', screenId, blockId })}
+            className="shrink-0 text-[10px] text-blue-600 underline hover:text-blue-800"
+            title="Let rebrands and copy rewrites regenerate this section again"
+          >
+            unlock
+          </button>
+        </div>
+      )}
 
       {editable && (
         <>
@@ -455,6 +467,17 @@ function StepPane({ screenId, stepId }: { screenId: string; stepId: string }) {
   return (
     <div className="px-3 py-3">
       <SectionLabel>Step</SectionLabel>
+      {step.custom && (
+        <div className="mb-1.5 flex items-center justify-between gap-2 rounded-md bg-blue-50 px-2 py-1.5">
+          <span className="text-[11px] font-medium text-blue-800">✎ Hand-edited — this flow won’t be regenerated</span>
+          <button
+            onClick={() => dispatch({ type: 'clear-custom', screenId, stepId })}
+            className="shrink-0 text-[10px] text-blue-600 underline hover:text-blue-800"
+          >
+            unlock
+          </button>
+        </div>
+      )}
       <TextField label="Name" value={step.name} onCommit={(v) => edit({ name: v }, `Renamed step to “${v}”`)} />
       <TextField
         label="Bot message"
@@ -573,7 +596,10 @@ function ChangelogTab() {
 
 function AuditTab() {
   const { state, dispatch } = useStudio();
-  const findings = useMemo(() => runAudit(state.tokens, state.screens), [state.tokens, state.screens]);
+  const findings = useMemo(
+    () => runAudit(state.tokens, state.screens, { business: state.business, exports: state.exports ?? {} }),
+    [state.tokens, state.screens, state.business, state.exports],
+  );
   const issues = findings.filter((f) => f.severity === 'issue');
   const warnings = findings.filter((f) => f.severity === 'warning');
   return (

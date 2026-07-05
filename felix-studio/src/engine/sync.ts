@@ -14,6 +14,7 @@ export interface SyncDoc {
   screens: StudioState['screens'];
   messages: StudioState['messages'];
   changelog: StudioState['changelog'];
+  exports: StudioState['exports'];
 }
 
 export function extractDoc(state: StudioState): SyncDoc {
@@ -23,6 +24,7 @@ export function extractDoc(state: StudioState): SyncDoc {
     screens: state.screens,
     messages: state.messages,
     changelog: state.changelog,
+    exports: state.exports ?? {},
   };
 }
 

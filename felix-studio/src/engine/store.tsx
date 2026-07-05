@@ -21,6 +21,7 @@ import {
   SyncStatus,
 } from './sync';
 import { runAudit } from './audit';
+import { askBrain } from './brain';
 import {
   generateBlockProps,
   generateFlowSteps,
@@ -73,6 +74,27 @@ const BLOCK_LABELS: Record<BlockKind, string> = {
 };
 
 export { BLOCK_LABELS };
+
+/** How much hand-edited content would a regeneration touch? */
+function countCustom(state: StudioState, screenId?: string): { blocks: number; steps: number } {
+  let blocks = 0;
+  let steps = 0;
+  for (const s of state.screens) {
+    if (screenId && s.id !== screenId) continue;
+    blocks += s.blocks.filter((b) => b.custom).length;
+    if (s.steps.some((st) => st.custom)) steps += 1; // flows are preserved wholesale
+  }
+  return { blocks, steps };
+}
+
+function keptNote(k: { blocks: number; steps: number }): string {
+  const parts: string[] = [];
+  if (k.blocks) parts.push(`${k.blocks} hand-edited section${k.blocks === 1 ? '' : 's'}`);
+  if (k.steps) parts.push(`${k.steps} hand-edited chat flow${k.steps === 1 ? '' : 's'}`);
+  return parts.length
+    ? ` I preserved ${parts.join(' and ')} — say “rewrite everything including my edits” to overwrite.`
+    : '';
+}
 
 // ---------------------------------------------------------------------------
 // Seed: a small product already in flight, so the canvas is never empty.
@@ -134,6 +156,7 @@ function seedState(): StudioState {
     business,
     tokens: DEFAULT_TOKENS,
     screens: [home, dashboard, appHome, support],
+    exports: {},
     selection: { kind: 'none' },
     messages: [
       {
@@ -154,10 +177,15 @@ function seedState(): StudioState {
 type Action =
   | { type: 'remote-sync'; doc: SyncDoc }
   | { type: 'converse'; input: string }
+  | { type: 'converse-pending'; input: string }
+  | { type: 'apply-brain'; reply: string; intents: Intent[] }
+  | { type: 'converse-fallback'; input: string }
+  | { type: 'mark-exported'; screenId: string; hash: string; summary: string }
   | { type: 'select'; selection: Selection }
   | { type: 'rename-screen'; screenId: string; name: string }
   | { type: 'move-screen'; screenId: string; x: number; y: number }
   | { type: 'delete-block'; screenId: string; blockId: string }
+  | { type: 'clear-custom'; screenId: string; blockId?: string; stepId?: string }
   | { type: 'shift-block'; screenId: string; blockId: string; dir: -1 | 1 }
   | { type: 'clear-overrides'; screenId: string; blockId: string }
   | { type: 'set-block-props'; screenId: string; blockId: string; props: Block['props']; summary: string }
@@ -288,7 +316,10 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       );
 
     case 'audit': {
-      const findings = runAudit(state.tokens, state.screens);
+      const findings = runAudit(state.tokens, state.screens, {
+        business: state.business,
+        exports: state.exports ?? {},
+      });
       const issues = findings.filter((f) => f.severity === 'issue').length;
       const warnings = findings.filter((f) => f.severity === 'warning').length;
       const headline =
@@ -326,6 +357,7 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
         return reply(state, `The product is already set up as ${name} (${industry}).`);
       }
       const business: Business = { name, industry };
+      const kept = countCustom(state);
       const next = withChange(
         state,
         'brand',
@@ -335,7 +367,7 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
           draft.business = business;
           for (const screen of draft.screens) {
             screen.blocks = regenerateBlocks(screen.blocks, business);
-            if (screen.surface === 'chat') {
+            if (screen.surface === 'chat' && !screen.steps.some((s) => s.custom)) {
               screen.steps = generateFlowSteps(business, draft.tokens.voice, uid);
             }
           }
@@ -343,12 +375,14 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       );
       return reply(
         next,
-        `Done — the product is now ${name}${intent.industry ? `, a ${industry}` : ''}. I rewrote every headline, feature, pricing tier, form and chat flow across all ${state.screens.length} frames from the new profile. Structure and tokens stayed put; only the content changed. Say “undo” if the old brand should come back.`,
+        `Done — the product is now ${name}${intent.industry ? `, a ${industry}` : ''}. I rewrote the content across all ${state.screens.length} frames from the new profile; structure and tokens stayed put.${keptNote(kept)} Say “undo” if the old brand should come back.`,
       );
     }
 
     case 'rewrite-copy': {
       const target = intent.screenName ? findScreen(state, intent.screenName) : undefined;
+      const force = intent.force === true;
+      const kept = force ? { blocks: 0, steps: 0 } : countCustom(state, target?.id);
       const next = withChange(
         state,
         'brand',
@@ -357,8 +391,8 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
         (draft) => {
           for (const screen of draft.screens) {
             if (target && screen.id !== target.id) continue;
-            screen.blocks = regenerateBlocks(screen.blocks, draft.business);
-            if (screen.surface === 'chat') {
+            screen.blocks = regenerateBlocks(screen.blocks, draft.business, force);
+            if (screen.surface === 'chat' && (force || !screen.steps.some((s) => s.custom))) {
               screen.steps = generateFlowSteps(draft.business, draft.tokens.voice, uid);
             }
           }
@@ -366,10 +400,57 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       );
       return reply(
         next,
-        target
+        (target
           ? `Refreshed the copy on “${target.name}” from the ${state.business.name} profile.`
-          : `Refreshed every headline, feature and chat message from the ${state.business.name} profile.`,
+          : `Refreshed the copy across the product from the ${state.business.name} profile.`) + keptNote(kept),
       );
+    }
+
+    case 'set-props': {
+      // LLM-authored content for one block. Prefer the selected block if it
+      // matches; otherwise the named/context screen's first block of that kind.
+      const sel = state.selection;
+      let screen: Screen | undefined;
+      let block: Block | undefined;
+      if (sel.kind === 'block' && !intent.screenName) {
+        const s = state.screens.find((sc) => sc.id === sel.screenId);
+        const b = s?.blocks.find((bl) => bl.id === sel.blockId);
+        if (s && b && b.kind === intent.block) {
+          screen = s;
+          block = b;
+        }
+      }
+      if (!block) {
+        screen = findScreen(state, intent.screenName);
+        block = screen?.blocks.find((b) => b.kind === intent.block);
+        if (!block) {
+          for (const s of state.screens) {
+            const hit = s.blocks.find((b) => b.kind === intent.block);
+            if (hit) {
+              screen = s;
+              block = hit;
+              break;
+            }
+          }
+        }
+      }
+      if (!screen || !block) {
+        return reply(state, `I couldn’t find a ${BLOCK_LABELS[intent.block]} to rewrite — which screen is it on?`);
+      }
+      const screenId = screen.id;
+      const blockId = block.id;
+      const next = withChange(
+        state,
+        'screen',
+        `Rewrote ${BLOCK_LABELS[intent.block]} on “${screen.name}”`,
+        undefined,
+        (draft) => {
+          const b = draft.screens.find((s) => s.id === screenId)!.blocks.find((bl) => bl.id === blockId)!;
+          b.props = { ...b.props, ...intent.props };
+          b.custom = true;
+        },
+      );
+      return reply(next, `Rewrote the ${BLOCK_LABELS[intent.block]} on “${screen.name}”. It’s marked hand-edited now, so rebrands will preserve it.`);
     }
 
     case 'set-prop': {
@@ -413,9 +494,10 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
         (draft) => {
           const b = draft.screens.find((s) => s.id === screenId)!.blocks.find((bl) => bl.id === blockId)!;
           (b.props[target.key] as string) = intent.value;
+          b.custom = true;
         },
       );
-      return reply(next, `Updated the ${intent.prop} on “${screen.name}” to “${intent.value}”.`);
+      return reply(next, `Updated the ${intent.prop} on “${screen.name}” to “${intent.value}”. That section is marked hand-edited now, so rebrands will preserve it.`);
     }
 
     case 'set-voice': {
@@ -424,6 +506,7 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
       if (tone === state.tokens.voice.tone && emoji === state.tokens.voice.emoji) {
         return reply(state, `The voice is already ${tone}${emoji ? ' with emoji' : ''}.`);
       }
+      const keptFlows: string[] = [];
       const next = withChange(
         state,
         'token',
@@ -431,17 +514,24 @@ function executeIntent(state: StudioState, intent: Intent): StudioState {
         undefined,
         (draft) => {
           draft.tokens.voice = { tone, emoji };
-          // Voice is a token: regenerate conversational surfaces from it.
+          // Voice is a token: regenerate conversational surfaces from it —
+          // except flows a human has edited.
           for (const screen of draft.screens) {
-            if (screen.surface === 'chat') {
-              screen.steps = generateFlowSteps(draft.business, { tone, emoji }, uid);
+            if (screen.surface !== 'chat') continue;
+            if (screen.steps.some((s) => s.custom)) {
+              keptFlows.push(screen.name);
+              continue;
             }
+            screen.steps = generateFlowSteps(draft.business, { tone, emoji }, uid);
           }
         },
       );
+      const keptMsg = keptFlows.length
+        ? ` I left “${keptFlows.join('”, “')}” alone — it has hand-edited steps; say “rewrite everything” to overwrite them.`
+        : '';
       return reply(
         next,
-        `Voice tokens updated: ${tone}${emoji ? ', emoji on' : intent.emoji === false ? ', emoji off' : ''}. Chat flows were regenerated in the new voice — visual surfaces keep their copy until you say “rewrite the copy”.`,
+        `Voice tokens updated: ${tone}${emoji ? ', emoji on' : intent.emoji === false ? ', emoji off' : ''}. Chat flows were regenerated in the new voice.${keptMsg}`,
       );
     }
 
@@ -681,6 +771,48 @@ function reducer(state: StudioState, action: Action): StudioState {
       return executeIntent(withUser, parse(input));
     }
 
+    case 'converse-pending': {
+      const input = action.input.trim();
+      if (!input) return state;
+      return {
+        ...state,
+        busy: true,
+        messages: [...state.messages, { id: uid(), role: 'designer', text: input }],
+      };
+    }
+
+    case 'apply-brain': {
+      // Execute the LLM's actions in order, then speak with its single voice:
+      // intermediate per-action replies are dropped in favor of the LLM reply.
+      let next: StudioState = { ...state, busy: false };
+      const baseline = next.messages;
+      let audit: Message['audit'];
+      for (const intent of action.intents) {
+        next = executeIntent(next, intent);
+        if (intent.type === 'audit') {
+          audit = next.messages[next.messages.length - 1]?.audit;
+        }
+      }
+      next = { ...next, messages: baseline };
+      const text = action.reply.trim() || (action.intents.length ? 'Done.' : 'I’m not sure what to do with that — try “help”.');
+      return sanitizeSelection(reply(next, text, audit));
+    }
+
+    case 'converse-fallback': {
+      // The brain was unreachable — run the deterministic parser on the
+      // already-appended designer message.
+      return executeIntent({ ...state, busy: false }, parse(action.input));
+    }
+
+    case 'mark-exported':
+      return {
+        ...state,
+        exports: {
+          ...state.exports,
+          [action.screenId]: { hash: action.hash, summary: action.summary },
+        },
+      };
+
     case 'select':
       return { ...state, selection: action.selection };
 
@@ -740,6 +872,22 @@ function reducer(state: StudioState, action: Action): StudioState {
       );
     }
 
+    case 'clear-custom': {
+      const screen = state.screens.find((s) => s.id === action.screenId);
+      if (!screen) return state;
+      return withChange(state, 'screen', `Unlocked hand-edited content on “${screen.name}”`, undefined, (draft) => {
+        const target = draft.screens.find((s) => s.id === action.screenId)!;
+        if (action.blockId) {
+          const b = target.blocks.find((bl) => bl.id === action.blockId);
+          if (b) delete b.custom;
+        }
+        if (action.stepId) {
+          const st = target.steps.find((s) => s.id === action.stepId);
+          if (st) delete st.custom;
+        }
+      });
+    }
+
     case 'clear-overrides': {
       const screen = state.screens.find((s) => s.id === action.screenId);
       const block = screen?.blocks.find((b) => b.id === action.blockId);
@@ -768,6 +916,7 @@ function reducer(state: StudioState, action: Action): StudioState {
           .find((s) => s.id === action.screenId)!
           .blocks.find((bl) => bl.id === action.blockId)!;
         b.props = action.props;
+        b.custom = true;
       });
     }
 
@@ -779,7 +928,7 @@ function reducer(state: StudioState, action: Action): StudioState {
         const t = draft.screens
           .find((s) => s.id === action.screenId)!
           .steps.find((s) => s.id === action.stepId)!;
-        Object.assign(t, action.patch);
+        Object.assign(t, action.patch, { custom: true });
       });
     }
 
@@ -862,6 +1011,11 @@ function reducer(state: StudioState, action: Action): StudioState {
 interface StudioContextValue {
   state: StudioState;
   dispatch: (action: Action) => void;
+  /**
+   * The smart conversation path: tries the LLM brain on the sync server,
+   * falls back to the deterministic parser when it's unreachable or keyless.
+   */
+  converse: (input: string) => void;
 }
 
 const StudioContext = createContext<StudioContextValue | null>(null);
@@ -888,7 +1042,12 @@ function loadInitial(): StudioState {
         parsed.screens.length > 0 &&
         parsed.screens[0].surface !== undefined
       ) {
-        return { ...parsed, selection: parsed.selection ?? { kind: 'none' } };
+        return {
+          ...parsed,
+          exports: parsed.exports ?? {},
+          busy: false,
+          selection: parsed.selection ?? { kind: 'none' },
+        };
       }
     }
     // Pre-multisurface saves (v1/v2) had hard-coded Fieldnote content and no
@@ -951,7 +1110,19 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     syncRef.current?.sendSelection(state.selection);
   }, [state.selection]);
 
-  const value = useMemo(() => ({ state, dispatch }), [state]);
+  const converse = useMemo(
+    () => (input: string) => {
+      const text = input.trim();
+      if (!text || stateRef.current.busy) return;
+      dispatch({ type: 'converse-pending', input: text });
+      askBrain(stateRef.current, text)
+        .then((result) => dispatch({ type: 'apply-brain', reply: result.reply, intents: result.intents }))
+        .catch(() => dispatch({ type: 'converse-fallback', input: text }));
+    },
+    [],
+  );
+
+  const value = useMemo(() => ({ state, dispatch, converse }), [state, converse]);
   const collab = useMemo<CollabContextValue>(
     () => ({
       status,

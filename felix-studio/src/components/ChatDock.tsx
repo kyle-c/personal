@@ -42,7 +42,7 @@ function FindingRow({ finding }: { finding: AuditFinding }) {
 
 /** Floating conversational dock over the canvas — Felix’s prompt bar. */
 export function ChatDock() {
-  const { state, dispatch } = useStudio();
+  const { state, converse } = useStudio();
   const [input, setInput] = useState('');
   const [open, setOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -54,11 +54,11 @@ export function ChatDock() {
       setOpen(true);
     }
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [state.messages.length, open]);
+  }, [state.messages.length, open, state.busy]);
 
   const send = (text: string) => {
     if (!text.trim()) return;
-    dispatch({ type: 'converse', input: text });
+    converse(text);
     setInput('');
   };
 
@@ -105,6 +105,15 @@ export function ChatDock() {
                 </div>
               </div>
             ))}
+            {state.busy && (
+              <div className="flex justify-start" data-testid="felix-thinking">
+                <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-stone-200 bg-white px-3 py-2.5">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-400" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-400 [animation-delay:150ms]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-stone-400 [animation-delay:300ms]" />
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-1.5 border-t border-stone-200 px-3 py-2">
             {SUGGESTIONS.map((s) => (

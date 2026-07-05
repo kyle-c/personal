@@ -38,17 +38,38 @@ Four principles drive the implementation:
    and one-click revert.
 4. **Maintenance is a dialogue.** The audit (`src/engine/audit.ts`) is
    surface-aware: token drift and WCAG contrast on visual surfaces; dead-end
-   replies, missing human handoffs and over-long messages in chat flows.
+   replies, missing human handoffs and over-long messages in chat flows; and
+   **stale exports** — every export embeds a manifest fingerprint, the studio
+   records it, and the audit flags shipped artifacts the product has moved
+   past. Re-export to clear it.
+5. **Human work is sacred.** Content you edit by hand (inspector fields, chat
+   steps, or LLM rewrites you asked for) is marked hand-edited: rebrands,
+   voice changes and copy rewrites preserve it and tell you what they kept.
+   Say "rewrite everything including my edits" to overwrite, or "unlock" a
+   section in the inspector.
 
-## The LLM seam
+## The LLM brain
 
-The demo is fully deterministic and offline — no API key. Two contracts mark
-exactly where a real LLM slots in without touching anything downstream:
+With an API key, Felix's conversation is a real LLM (Claude, via the sync
+server so the key never reaches the browser):
 
-- **`parse(input): Intent`** (`src/engine/parser.ts`) — language → typed intent.
-- **`generateBlockProps` / `generateFlowSteps`** (`src/engine/copywriter.ts`) —
-  business profile + voice → content. The demo ships archetypes for
-  food, health, fitness, hospitality, retail, agencies and a SaaS fallback.
+```bash
+ANTHROPIC_API_KEY=sk-ant-... npm run server     # brain ON
+FELIX_MODEL=claude-sonnet-5 ... npm run server  # optional; default claude-opus-4-8
+```
+
+The brain (`server/brain.mjs`) gets the designer's message plus a compact
+product summary and returns a reply and typed actions via structured outputs
+— it can ask clarifying questions, resolve multi-turn context ("make *it*
+darker"), warn about contrast, and write real copy into any block
+(`set_props`). The client (`src/engine/brain.ts`) validates every action
+before executing; the LLM proposes, the studio disposes. Opus 4.8 is the
+default because the copy is the product — quality shows.
+
+**Without a key, nothing breaks**: the deterministic parser
+(`src/engine/parser.ts`) and copywriter (`src/engine/copywriter.ts`, seven
+industry archetypes) handle the same conversation offline — that's also what
+the hosted demo runs.
 
 ## Surfaces
 

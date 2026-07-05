@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Check, Copy, Download, X } from 'lucide-react';
 import { exportScreen } from '../engine/exporters';
+import { exportHash } from '../engine/hash';
 import { SURFACE_LABELS, useStudio } from '../engine/store';
 
 export function ExportDialog({ onClose }: { onClose: () => void }) {
-  const { state } = useStudio();
+  const { state, dispatch } = useStudio();
   const [screenId, setScreenId] = useState(state.screens[0]?.id ?? '');
   const [copied, setCopied] = useState(false);
   const screen = state.screens.find((s) => s.id === screenId) ?? state.screens[0];
@@ -15,6 +16,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   if (!screen || !artifact) return null;
 
+  // Taking the artifact out of the studio is the moment it "ships" — record
+  // the fingerprint so the audit can flag it when the product moves on.
+  const recordExport = () =>
+    dispatch({
+      type: 'mark-exported',
+      screenId: screen.id,
+      hash: exportHash(screen, state.tokens, state.business),
+      summary: artifact.filename,
+    });
+
   const download = () => {
     const blob = new Blob([artifact.code], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -23,6 +34,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     a.download = artifact.filename;
     a.click();
     URL.revokeObjectURL(url);
+    recordExport();
   };
 
   const copy = async () => {
@@ -33,6 +45,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     } catch {
       // Clipboard unavailable (permissions) — the user can still select the text.
     }
+    recordExport();
   };
 
   return (

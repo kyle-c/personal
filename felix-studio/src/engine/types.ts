@@ -61,6 +61,8 @@ export interface Block {
   id: string;
   kind: BlockKind;
   props: BlockProps;
+  /** Set when a human wrote this content — regeneration preserves it. */
+  custom?: boolean;
   /**
    * Ad-hoc style overrides applied outside the token system. Kept as an
    * explicit escape hatch so the drift audit has something real to catch.
@@ -74,6 +76,8 @@ export interface ChatStep {
   name: string;
   message: string;
   replies: { label: string; goTo?: string }[];
+  /** Set when a human wrote this step — regeneration preserves the flow. */
+  custom?: boolean;
 }
 
 /**
@@ -129,4 +133,11 @@ export interface StudioState {
   selection: Selection;
   messages: Message[];
   changelog: ChangelogEntry[];
+  /**
+   * Fingerprint of each screen at its last export — lets the audit tell you
+   * when a shipped artifact has drifted from the product.
+   */
+  exports: Record<string, { hash: string; summary: string }>;
+  /** True while Felix's LLM brain is composing a response. */
+  busy?: boolean;
 }

@@ -536,7 +536,12 @@ export function generateFlowSteps(
   ];
 }
 
-/** Re-generate content for existing blocks after a rebrand. Structure stays. */
-export function regenerateBlocks(blocks: Block[], business: Business): Block[] {
-  return blocks.map((b) => ({ ...b, props: generateBlockProps(b.kind, business) }));
+/**
+ * Re-generate content for existing blocks after a rebrand. Structure stays,
+ * and hand-edited blocks are preserved unless `force` — human work is sacred.
+ */
+export function regenerateBlocks(blocks: Block[], business: Business, force = false): Block[] {
+  return blocks.map((b) =>
+    b.custom && !force ? b : { ...b, props: generateBlockProps(b.kind, business), custom: undefined },
+  );
 }
