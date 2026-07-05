@@ -6,8 +6,20 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
+  useState,
 } from 'react';
 import { DEFAULT_TOKENS, TokenSet } from '../felix/tokens';
+import {
+  currentRoom,
+  extractDoc,
+  FelixSync,
+  Identity,
+  loadIdentity,
+  Peer,
+  SyncDoc,
+  SyncStatus,
+} from './sync';
 import { runAudit } from './audit';
 import {
   generateBlockProps,
@@ -140,6 +152,7 @@ function seedState(): StudioState {
 // ---------------------------------------------------------------------------
 
 type Action =
+  | { type: 'remote-sync'; doc: SyncDoc }
   | { type: 'converse'; input: string }
   | { type: 'select'; selection: Selection }
   | { type: 'rename-screen'; screenId: string; name: string }
@@ -652,6 +665,12 @@ function insertBlock(screen: Screen, block: Block) {
 
 function reducer(state: StudioState, action: Action): StudioState {
   switch (action.type) {
+    case 'remote-sync': {
+      // A teammate's change arrived: adopt the shared document, keep this
+      // tab's selection (dropping it if it points at something now gone).
+      return sanitizeSelection({ ...state, ...action.doc });
+    }
+
     case 'converse': {
       const input = action.input.trim();
       if (!input) return state;
@@ -847,6 +866,16 @@ interface StudioContextValue {
 
 const StudioContext = createContext<StudioContextValue | null>(null);
 
+interface CollabContextValue {
+  status: SyncStatus;
+  peers: Peer[];
+  identity: Identity;
+  room: string;
+  sendCursor: (cursor: { x: number; y: number } | null) => void;
+}
+
+const CollabContext = createContext<CollabContextValue | null>(null);
+
 function loadInitial(): StudioState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -872,8 +901,44 @@ function loadInitial(): StudioState {
 
 export function StudioProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, loadInitial);
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const [status, setStatus] = useState<SyncStatus>('connecting');
+  const identity = useMemo(loadIdentity, []);
+  const room = useMemo(currentRoom, []);
+  const syncRef = useRef<FelixSync | null>(null);
+  // JSON of the last doc that came FROM the server — used to suppress echo:
+  // when our own state equals it, there is nothing of ours to send.
+  const lastRemoteJson = useRef<string | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
+    const sync = new FelixSync(room, identity, {
+      onRemoteDoc: (doc) => {
+        lastRemoteJson.current = JSON.stringify(doc);
+        dispatch({ type: 'remote-sync', doc });
+      },
+      onSeedRequest: () => {
+        const doc = extractDoc(stateRef.current);
+        lastRemoteJson.current = null;
+        sync.sendDoc(doc);
+      },
+      onPeers: setPeers,
+      onStatus: setStatus,
+    });
+    syncRef.current = sync;
+    return () => sync.close();
+    // identity and room are stable for the life of the tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Push local document changes to the room (skipping remote echoes).
+  useEffect(() => {
+    const doc = extractDoc(state);
+    const json = JSON.stringify(doc);
+    if (json !== lastRemoteJson.current) {
+      syncRef.current?.sendDoc(doc);
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
@@ -881,12 +946,37 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }
   }, [state]);
 
+  // Selection is presence, not document state.
+  useEffect(() => {
+    syncRef.current?.sendSelection(state.selection);
+  }, [state.selection]);
+
   const value = useMemo(() => ({ state, dispatch }), [state]);
-  return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
+  const collab = useMemo<CollabContextValue>(
+    () => ({
+      status,
+      peers,
+      identity,
+      room,
+      sendCursor: (c) => syncRef.current?.sendCursor(c),
+    }),
+    [status, peers, identity, room],
+  );
+  return (
+    <StudioContext.Provider value={value}>
+      <CollabContext.Provider value={collab}>{children}</CollabContext.Provider>
+    </StudioContext.Provider>
+  );
 }
 
 export function useStudio(): StudioContextValue {
   const ctx = useContext(StudioContext);
   if (!ctx) throw new Error('useStudio must be used inside StudioProvider');
+  return ctx;
+}
+
+export function useCollab(): CollabContextValue {
+  const ctx = useContext(CollabContext);
+  if (!ctx) throw new Error('useCollab must be used inside StudioProvider');
   return ctx;
 }

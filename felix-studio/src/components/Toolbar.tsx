@@ -9,7 +9,45 @@ import {
   Share,
 } from 'lucide-react';
 import { CanvasApi, Tool, Viewport } from './Canvas';
-import { useStudio } from '../engine/store';
+import { useCollab, useStudio } from '../engine/store';
+
+/** Who's here: your avatar plus every connected peer, Figma-style. */
+function PresenceStack() {
+  const { status, peers, identity, room } = useCollab();
+  return (
+    <div className="flex items-center gap-2" title={status === 'live' ? `Live — room “${room}”` : status === 'solo' ? 'Solo — run `npm run server` for multiplayer' : 'Connecting to sync server…'}>
+      <div className="flex -space-x-1.5">
+        <span
+          data-testid="avatar-you"
+          className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white"
+          style={{ background: identity.color }}
+        >
+          {identity.name[0]}
+        </span>
+        {peers.map((p) => (
+          <span
+            key={p.id}
+            data-testid="avatar-peer"
+            className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white"
+            style={{ background: p.color }}
+            title={p.name}
+          >
+            {p.name[0]}
+          </span>
+        ))}
+      </div>
+      <span className="flex items-center gap-1 text-[11px] text-stone-500">
+        <span
+          className={
+            'inline-block h-1.5 w-1.5 rounded-full ' +
+            (status === 'live' ? 'bg-green-500' : status === 'solo' ? 'bg-stone-300' : 'animate-pulse bg-amber-400')
+          }
+        />
+        {status === 'live' ? `${peers.length + 1} here` : status === 'solo' ? 'solo' : '…'}
+      </span>
+    </div>
+  );
+}
 
 export function Toolbar({
   tool,
@@ -56,6 +94,8 @@ export function Toolbar({
       </div>
 
       <div className="flex items-center gap-0.5">
+        <PresenceStack />
+        <div className="mx-1.5 h-5 w-px bg-stone-200" />
         <button className={iconBtn} onClick={() => api()?.zoomOut()} title="Zoom out">
           <Minus size={15} />
         </button>

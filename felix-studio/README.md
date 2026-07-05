@@ -8,8 +8,12 @@ talking to the design system itself.
 ```bash
 cd felix-studio
 npm install
-npm run dev
+npm run server   # terminal 1 — sync server (persistence + multiplayer)
+npm run dev      # terminal 2 — the studio
 ```
+
+Open the printed URL in two browser windows to see multiplayer. Without the
+server, the studio runs solo on `localStorage` — everything else still works.
 
 ## The idea
 
@@ -73,11 +77,31 @@ orders"*, then **Export** in the toolbar.
 - **Chat dock.** Felix floats over the canvas. Conversation and direct
   manipulation write to the same store, so both land in the changelog.
 
-State persists to `localStorage`; "Reset demo" starts over. The Dashboard frame
-ships with one deliberately drifted block so the audit has something real to
-find. Real persistence/collaboration is the next layer: the changelog is
-already shaped like a commit log — it wants a backend, which this prototype
-deliberately stops short of.
+The Dashboard frame ships with one deliberately drifted block so the audit has
+something real to find. "Reset demo" starts over.
+
+## Persistence & collaboration
+
+Running `npm run server` starts a small WebSocket server (`server/index.mjs`,
+port 8787) that makes the studio multiplayer and durable:
+
+- **Shared document.** Business profile, tokens, screens, changelog *and the
+  Felix conversation* are one document per room, held authoritatively on the
+  server, persisted to `server/data/<room>.json`, and streamed to everyone in
+  the room. A new teammate joining an existing room receives the product as it
+  stands — nothing lives only in a browser.
+- **Rooms.** The URL hash is the room: `…/#spring-redesign`. No hash = the
+  `studio` room. Each room is its own product.
+- **Presence.** Live named cursors in your teammate's color, colored outlines
+  on whatever frame / section / chat step they have selected, and an avatar
+  stack with a connection indicator in the toolbar. Presence is relayed, never
+  stored.
+- **Conflict model.** Server-ordered last-writer-wins on the whole document —
+  deliberately the simplest thing that works for a small team. The upgrade
+  path is CRDTs (Yjs) behind the same message shapes, and the identity stub
+  (`loadIdentity` in `src/engine/sync.ts`) is where real auth plugs in.
+- **Offline.** No server (or a dropped connection after retries) degrades to
+  solo mode on `localStorage`; the hosted demo runs this way permanently.
 
 ## A note on sources
 

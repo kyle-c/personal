@@ -11,11 +11,14 @@ import { ChatStep, Screen } from '../engine/types';
 export function ChatTranscript({
   screen,
   selectedStepId,
+  remoteSteps = {},
   interactive,
   scale,
 }: {
   screen: Screen;
   selectedStepId: string | null;
+  /** Peer color per step id, for remote selection outlines. */
+  remoteSteps?: Record<string, string>;
   interactive: boolean;
   scale: number;
 }) {
@@ -51,6 +54,7 @@ export function ChatTranscript({
       )}
       {screen.steps.map((step: ChatStep) => {
         const selected = step.id === selectedStepId;
+        const remoteColor = remoteSteps[step.id];
         return (
           <div
             key={step.id}
@@ -170,9 +174,15 @@ export function ChatTranscript({
             <div
               className={
                 'pointer-events-none absolute -inset-1 rounded ' +
-                (selected ? '' : interactive ? 'group-hover:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.45)]' : '')
+                (selected || remoteColor ? '' : interactive ? 'group-hover:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.45)]' : '')
               }
-              style={selected ? { boxShadow: `inset 0 0 0 ${2 / scale}px #3B82F6` } : undefined}
+              style={
+                selected
+                  ? { boxShadow: `inset 0 0 0 ${2 / scale}px #3B82F6` }
+                  : remoteColor
+                    ? { boxShadow: `inset 0 0 0 ${2 / scale}px ${remoteColor}` }
+                    : undefined
+              }
             />
           </div>
         );

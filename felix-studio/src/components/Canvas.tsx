@@ -6,11 +6,32 @@ import {
   useRef,
   useState,
 } from 'react';
+import { MousePointer2 } from 'lucide-react';
 import { tokensToCssVars } from '../felix/tokens';
-import { BLOCK_LABELS, FRAME_WIDTHS, SURFACE_LABELS, useStudio } from '../engine/store';
+import { BLOCK_LABELS, FRAME_WIDTHS, SURFACE_LABELS, useCollab, useStudio } from '../engine/store';
+import { Peer } from '../engine/sync';
 import { Screen } from '../engine/types';
 import { BlockRenderer } from './blocks';
 import { ChatTranscript } from './ChatTranscript';
+
+/** Remote presence marks for one frame: peer colors keyed by what they hold. */
+export interface RemoteMarks {
+  frame?: { color: string; name: string };
+  blocks: Record<string, string>;
+  steps: Record<string, string>;
+}
+
+function remoteMarksFor(screenId: string, peers: Peer[]): RemoteMarks {
+  const marks: RemoteMarks = { blocks: {}, steps: {} };
+  for (const p of peers) {
+    const sel = p.selection;
+    if (!sel || sel.kind === 'none' || sel.screenId !== screenId) continue;
+    if (sel.kind === 'screen') marks.frame = { color: p.color, name: p.name };
+    if (sel.kind === 'block') marks.blocks[sel.blockId] = p.color;
+    if (sel.kind === 'step') marks.steps[sel.stepId] = p.color;
+  }
+  return marks;
+}
 
 export type Tool = 'select' | 'hand';
 
@@ -102,6 +123,7 @@ function Frame({
   selected,
   selectedBlockId,
   selectedStepId,
+  remote,
   tool,
   scale,
   onMove,
@@ -110,6 +132,7 @@ function Frame({
   selected: boolean;
   selectedBlockId: string | null;
   selectedStepId: string | null;
+  remote: RemoteMarks;
   tool: Tool;
   scale: number;
   onMove: (x: number, y: number) => void;
@@ -170,7 +193,9 @@ function Frame({
           borderRadius: isPhone ? 24 : 6,
           boxShadow: selected
             ? `0 0 0 ${2 / scale}px #3B82F6, 0 8px 24px rgba(28,25,23,0.12)`
-            : '0 0 0 1px rgba(28,25,23,0.08), 0 8px 24px rgba(28,25,23,0.10)',
+            : remote.frame
+              ? `0 0 0 ${2 / scale}px ${remote.frame.color}, 0 8px 24px rgba(28,25,23,0.12)`
+              : '0 0 0 1px rgba(28,25,23,0.08), 0 8px 24px rgba(28,25,23,0.10)',
           background: 'var(--felix-color-background)',
         }}
       >
@@ -180,6 +205,7 @@ function Frame({
             <ChatTranscript
               screen={screen}
               selectedStepId={selectedStepId}
+              remoteSteps={remote.steps}
               interactive={interactive}
               scale={scale}
             />
@@ -194,6 +220,7 @@ function Frame({
             ) : (
               screen.blocks.map((block) => {
                 const isSel = block.id === selectedBlockId;
+                const remoteColor = remote.blocks[block.id];
                 return (
                   <div
                     key={block.id}
@@ -213,9 +240,15 @@ function Frame({
                     <div
                       className={
                         'pointer-events-none absolute inset-0 transition-[box-shadow] ' +
-                        (isSel ? '' : 'group-hover:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.55)]')
+                        (isSel || remoteColor ? '' : 'group-hover:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.55)]')
                       }
-                      style={isSel ? { boxShadow: `inset 0 0 0 ${2 / scale}px #3B82F6` } : undefined}
+                      style={
+                        isSel
+                          ? { boxShadow: `inset 0 0 0 ${2 / scale}px #3B82F6` }
+                          : remoteColor
+                            ? { boxShadow: `inset 0 0 0 ${2 / scale}px ${remoteColor}` }
+                            : undefined
+                      }
                     />
                     {isSel && (
                       <div
@@ -253,6 +286,7 @@ export function Canvas({
   apiRef: MutableRefObject<CanvasApi | null>;
 }) {
   const { state, dispatch } = useStudio();
+  const { peers, sendCursor } = useCollab();
   const containerRef = useRef<HTMLDivElement>(null);
   const panRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -360,6 +394,15 @@ export function Canvas({
     }
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    // Presence: share the cursor in world coordinates so every peer sees it
+    // in the right place regardless of their own pan/zoom.
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      sendCursor({
+        x: (e.clientX - rect.left - viewport.x) / viewport.scale,
+        y: (e.clientY - rect.top - viewport.y) / viewport.scale,
+      });
+    }
     const p = panRef.current;
     if (!p) return;
     setViewport((prev) => ({
@@ -371,6 +414,9 @@ export function Canvas({
   const onPointerUp = () => {
     panRef.current = null;
   };
+  const onPointerLeave = () => {
+    sendCursor(null);
+  };
 
   return (
     <div
@@ -379,6 +425,7 @@ export function Canvas({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerLeave={onPointerLeave}
       onClick={() => {
         if (!panning) dispatch({ type: 'select', selection: { kind: 'none' } });
       }}
@@ -417,10 +464,35 @@ export function Canvas({
                 ? state.selection.stepId
                 : null
             }
+            remote={remoteMarksFor(s.id, peers)}
             onMove={(x, y) => dispatch({ type: 'move-screen', screenId: s.id, x, y })}
           />
         ))}
       </div>
+
+      {/* Peer cursors — world coords mapped through this tab's viewport. */}
+      {peers
+        .filter((p) => p.cursor)
+        .map((p) => (
+          <div
+            key={p.id}
+            data-testid="peer-cursor"
+            className="pointer-events-none absolute z-10"
+            style={{
+              left: p.cursor!.x * viewport.scale + viewport.x,
+              top: p.cursor!.y * viewport.scale + viewport.y,
+              transition: 'left 60ms linear, top 60ms linear',
+            }}
+          >
+            <MousePointer2 size={16} fill={p.color} style={{ color: p.color }} />
+            <span
+              className="ml-3 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
+              style={{ background: p.color }}
+            >
+              {p.name}
+            </span>
+          </div>
+        ))}
     </div>
   );
 }
